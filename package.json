@@ -9,7 +9,8 @@
     "dev": "bash scripts/start-relay.sh",
     "generate-settings": "bash scripts/generate-settings.sh",
     "start:autoreply": "bash scripts/start-claude-autoreply.sh",
-    "memory:smoke": "node tools/memory-smoke.js"
+    "memory:smoke": "node tools/memory-smoke.js",
+    "memory:inspect": "node tools/memory-inspect.js"
   },
   "dependencies": {
     "discord.js": "^14.23.2",
