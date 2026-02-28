@@ -8,7 +8,7 @@ process.emit = function (event, ...args) {
 }
 
 import express from 'express'
-import { Client, GatewayIntentBits } from 'discord.js'
+import { Client, GatewayIntentBits, SlashCommandBuilder, REST, Routes } from 'discord.js'
 import { DatabaseSync } from 'node:sqlite'
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -31,10 +31,36 @@ const ALLOWED_CHANNEL_IDS = (process.env.DISCORD_ALLOWED_CHANNEL_IDS || '')
   .split(',')
   .map(s => s.trim())
   .filter(Boolean)
+const IGNORED_CHANNEL_IDS = new Set(
+  (process.env.DISCORD_IGNORED_CHANNEL_IDS || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+)
 const ALLOWED_DISCORD_USER_IDS = (process.env.ALLOWED_DISCORD_USER_IDS || '')
   .split(',')
   .map(s => s.trim())
   .filter(Boolean)
+
+// Model alias map: short names -> full Claude API model IDs
+const MODEL_ALIASES = {
+  'opus': 'claude-opus-4-6',
+  'sonnet': 'claude-sonnet-4-6',
+  'haiku': 'claude-haiku-4-5-20251001',
+  'opus-4.6': 'claude-opus-4-6',
+  'sonnet-4.6': 'claude-sonnet-4-6',
+  'haiku-4.5': 'claude-haiku-4-5-20251001',
+  'opus-4.5': 'claude-opus-4-5-20251101',
+  'sonnet-4.5': 'claude-sonnet-4-5-20250929',
+  'opus-4.1': 'claude-opus-4-1-20250805',
+  'sonnet-4': 'claude-sonnet-4-20250514',
+  'opus-4': 'claude-opus-4-20250514',
+}
+
+function resolveModelAlias(input) {
+  const normalized = String(input || '').trim().toLowerCase()
+  return MODEL_ALIASES[normalized] || input
+}
 
 const DISCORD_SESSION_ID = process.env.DISCORD_SESSION_ID || 'default'
 const CLAUDE_AGENT_ID = process.env.CLAUDE_AGENT_ID || 'claude'
@@ -105,6 +131,13 @@ db.exec(`
     ON messages(source, external_id);
   CREATE INDEX IF NOT EXISTS idx_agent_activity_status
     ON agent_activity(status);
+
+  CREATE TABLE IF NOT EXISTS channel_models (
+    channel_id TEXT PRIMARY KEY,
+    model TEXT NOT NULL,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_by TEXT
+  );
 `)
 
 const insertStmt = db.prepare(`
@@ -120,6 +153,31 @@ const insertStmt = db.prepare(`
     read
   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `)
+
+// DB-backed channel model helpers
+function getChannelModel(channelId) {
+  try {
+    const row = db.prepare('SELECT model FROM channel_models WHERE channel_id = ?').get(channelId)
+    return row?.model || null
+  } catch {
+    return null
+  }
+}
+
+function setChannelModel(channelId, model, updatedBy) {
+  db.prepare(`
+    INSERT INTO channel_models (channel_id, model, updated_at, updated_by)
+    VALUES (?, ?, CURRENT_TIMESTAMP, ?)
+    ON CONFLICT(channel_id) DO UPDATE SET
+      model = excluded.model,
+      updated_at = excluded.updated_at,
+      updated_by = excluded.updated_by
+  `).run(channelId, model, updatedBy || null)
+}
+
+function clearChannelModel(channelId) {
+  db.prepare('DELETE FROM channel_models WHERE channel_id = ?').run(channelId)
+}
 
 const memorySessionKey = buildMemorySessionKey({
   sessionId: DISCORD_SESSION_ID,
@@ -161,10 +219,13 @@ async function appendMemoryTurn({ role, content, metadata = {} }) {
 
 function isAllowedChannel(channelId) {
   if (!channelId) return false
+  // Deny takes precedence
+  if (IGNORED_CHANNEL_IDS.has(channelId)) return false
+  // If an explicit allowlist is set, use it; otherwise allow all
   if (ALLOWED_CHANNEL_IDS.length > 0) {
     return ALLOWED_CHANNEL_IDS.includes(channelId)
   }
-  return channelId === DEFAULT_CHANNEL_ID
+  return true
 }
 
 function isAllowedUser(userId) {
@@ -397,13 +458,41 @@ const client = new Client({
   ]
 })
 
-client.once('ready', () => {
+client.once('ready', async () => {
   console.log(`[Relay] Discord bot ready as ${client.user?.tag}`)
   console.log(`[Relay] Listening for inbound messages on channel(s): ${ALLOWED_CHANNEL_IDS.length > 0 ? ALLOWED_CHANNEL_IDS.join(', ') : DEFAULT_CHANNEL_ID}`)
   console.log(`[Relay] User allowlist: ${ALLOWED_DISCORD_USER_IDS.length > 0 ? ALLOWED_DISCORD_USER_IDS.join(', ') : 'disabled (all users in allowed channels)'}`)
   console.log(`[Relay] API auth: ${RELAY_ALLOW_NO_AUTH ? 'disabled (RELAY_ALLOW_NO_AUTH=true)' : 'required'}`)
   console.log(`[Relay] Busy queue notify: ${BUSY_NOTIFY_ON_QUEUE ? `on (cooldown=${BUSY_NOTIFY_COOLDOWN_MS}ms)` : 'off'}`)
   console.log(`[Relay] Typing: interval=${TYPING_INTERVAL_MS}ms, max=${TYPING_MAX_MS}ms, fallback=${THINKING_FALLBACK_ENABLED ? 'on' : 'off'}`)
+
+  // Register /model slash command
+  try {
+    const aliasChoices = Object.keys(MODEL_ALIASES).map(alias => ({
+      name: `${alias} (${MODEL_ALIASES[alias]})`,
+      value: alias,
+    }))
+
+    const modelCommand = new SlashCommandBuilder()
+      .setName('model')
+      .setDescription('Get or set the Claude model for this channel')
+      .addStringOption(option =>
+        option
+          .setName('name')
+          .setDescription('Model name or alias (e.g. opus, sonnet, haiku, or full model ID)')
+          .setRequired(false)
+          .addChoices(...aliasChoices)
+      )
+
+    const rest = new REST({ version: '10' }).setToken(DISCORD_BOT_TOKEN)
+    await rest.put(
+      Routes.applicationCommands(client.user.id),
+      { body: [modelCommand.toJSON()] }
+    )
+    console.log('[Relay] Registered /model slash command')
+  } catch (err) {
+    console.error('[Relay] Failed to register slash commands:', err.message)
+  }
 })
 
 client.on('messageCreate', (message) => {
@@ -419,6 +508,37 @@ client.on('messageCreate', (message) => {
   startTypingIndicator(message.channelId)
   // If Claude is currently blocked on another tool, notify user message is queued.
   maybeNotifyBusyQueued(message)
+})
+
+client.on('interactionCreate', async (interaction) => {
+  if (!interaction.isChatInputCommand()) return
+  if (interaction.commandName !== 'model') return
+
+  const modelArg = interaction.options.getString('name')
+
+  if (!modelArg) {
+    // No argument: show current model for this channel
+    const current = getChannelModel(interaction.channelId)
+    if (current) {
+      await interaction.reply(`Current model for this channel: \`${current}\``)
+    } else {
+      await interaction.reply('No model set for this channel (using default).')
+    }
+    return
+  }
+
+  if (modelArg === 'clear' || modelArg === 'reset' || modelArg === 'default') {
+    clearChannelModel(interaction.channelId)
+    await interaction.reply('Model override cleared for this channel. Using default model.')
+    console.log(`[Relay] Model cleared for channel ${interaction.channelId} by ${interaction.user?.tag}`)
+    return
+  }
+
+  const resolved = resolveModelAlias(modelArg)
+  setChannelModel(interaction.channelId, resolved, interaction.user?.tag || interaction.user?.id || null)
+  const aliasNote = resolved !== modelArg ? ` (alias: \`${modelArg}\`)` : ''
+  await interaction.reply(`Model for this channel set to: \`${resolved}\`${aliasNote}`)
+  console.log(`[Relay] Model set for channel ${interaction.channelId}: ${resolved} by ${interaction.user?.tag}`)
 })
 
 client.on('error', (err) => {
@@ -444,6 +564,46 @@ app.get('/health', (_req, res) => {
     defaultChannelId: DEFAULT_CHANNEL_ID,
     sessionId: DISCORD_SESSION_ID
   })
+})
+
+app.get('/api/channels', async (req, res) => {
+  try {
+    if (!RELAY_ALLOW_NO_AUTH) {
+      const token = req.header('x-api-token') || req.header('authorization')?.replace(/^Bearer\s+/i, '')
+      if (!token || token !== RELAY_API_TOKEN) {
+        res.status(401).json({ success: false, error: 'Unauthorized' })
+        return
+      }
+    }
+
+    if (!client.user) {
+      res.status(503).json({ success: false, error: 'Discord client not ready yet' })
+      return
+    }
+
+    const channels = []
+    for (const [, guild] of client.guilds.cache) {
+      const guildChannels = await guild.channels.fetch()
+      for (const [, channel] of guildChannels) {
+        if (!channel || !channel.isTextBased() || channel.isThread()) continue
+        if (IGNORED_CHANNEL_IDS.has(channel.id)) continue
+        if (ALLOWED_CHANNEL_IDS.length > 0 && !ALLOWED_CHANNEL_IDS.includes(channel.id)) continue
+        channels.push({
+          id: channel.id,
+          name: channel.name,
+          guildId: guild.id,
+          guildName: guild.name,
+          type: channel.type,
+          model: getChannelModel(channel.id),
+        })
+      }
+    }
+
+    res.json({ success: true, channels })
+  } catch (err) {
+    console.error('[Relay] /api/channels failed:', err)
+    res.status(500).json({ success: false, error: err.message })
+  }
 })
 
 app.post('/api/send', async (req, res) => {

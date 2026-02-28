@@ -37,6 +37,7 @@ let timeoutSeconds = 300
 let deliverMode = false
 let strictTimeout = false
 let quietTimeout = String(process.env.WAIT_QUIET_TIMEOUT || 'true').toLowerCase() !== 'false'
+let channelFilter = process.env.DISCORD_CHANNEL_FILTER || ''
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--agent' && args[i + 1]) {
@@ -45,6 +46,8 @@ for (let i = 0; i < args.length; i++) {
     sessionId = args[++i]
   } else if (args[i] === '--timeout' && args[i + 1]) {
     timeoutSeconds = Number(args[++i])
+  } else if (args[i] === '--channel' && args[i + 1]) {
+    channelFilter = args[++i]
   } else if (args[i] === '--deliver') {
     deliverMode = true
   } else if (args[i] === '--strict-timeout') {
@@ -70,7 +73,8 @@ mkdirSync(TEMP_DIR, { recursive: true })
 
 const safeAgent = sanitizeForFilename(agentId)
 const safeSession = sanitizeForFilename(sessionId)
-const lockFile = join(TEMP_DIR, `poller-${safeAgent}-${safeSession}.lock`)
+const safeChannel = channelFilter ? `-ch${sanitizeForFilename(channelFilter)}` : ''
+const lockFile = join(TEMP_DIR, `poller-${safeAgent}-${safeSession}${safeChannel}.lock`)
 
 function sanitizeForFilename(input) {
   return String(input || 'x').replace(/[^a-zA-Z0-9_.-]/g, '_')
@@ -153,7 +157,7 @@ process.on('exit', () => {
 
 async function buildMemoryContext(queryText) {
   const memoryDbPath = join(ROOT_DIR, 'data', 'memory.db')
-  const memorySessionKey = buildMemorySessionKey({ sessionId, agentId })
+  const memorySessionKey = buildMemorySessionKey({ sessionId, agentId, channelId: channelFilter || undefined })
   const runtimeHint = process.env.CLAUDE_RUNTIME_ID || null
 
   let store
@@ -191,26 +195,36 @@ async function buildMemoryContext(queryText) {
 }
 
 function checkCount(db) {
+  const channelClause = channelFilter ? ' AND channel_id = ?' : ''
+  const params = channelFilter
+    ? [sessionId, ...targets, channelFilter]
+    : [sessionId, ...targets]
   const row = db.prepare(`
     SELECT COUNT(*) as count
     FROM messages
     WHERE session_id = ?
       AND to_agent IN (${placeholders})
       AND read = 0
-  `).get(sessionId, ...targets)
+      ${channelClause}
+  `).get(...params)
   return row.count
 }
 
 async function deliverMessages(db) {
   db.exec('BEGIN IMMEDIATE')
+  const channelClause = channelFilter ? ' AND channel_id = ?' : ''
+  const params = channelFilter
+    ? [sessionId, ...targets, channelFilter]
+    : [sessionId, ...targets]
   const rows = db.prepare(`
-    SELECT id, from_agent, message_type, content
+    SELECT id, from_agent, message_type, content, channel_id
     FROM messages
     WHERE session_id = ?
       AND to_agent IN (${placeholders})
       AND read = 0
+      ${channelClause}
     ORDER BY id ASC
-  `).all(sessionId, ...targets)
+  `).all(...params)
 
   if (rows.length === 0) {
     db.exec('COMMIT')
@@ -224,7 +238,8 @@ async function deliverMessages(db) {
 
   const formatted = rows.map(r => {
     const oneLine = String(r.content).replace(/\r/g, '').replace(/\n/g, ' ')
-    return `[MESSAGE from ${r.from_agent}] [${r.message_type}]: ${oneLine}`
+    const channelTag = r.channel_id ? ` [channel:${r.channel_id}]` : ''
+    return `[MESSAGE from ${r.from_agent}]${channelTag} [${r.message_type}]: ${oneLine}`
   })
 
   const latestQueryText = String(rows[rows.length - 1]?.content || '')
