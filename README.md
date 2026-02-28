@@ -44,7 +44,9 @@ Set at least:
 Optional:
 
 - `DISCORD_ALLOWED_CHANNEL_IDS` (comma list)
-- `RELAY_API_TOKEN` (recommended)
+- `ALLOWED_DISCORD_USER_IDS` (comma list of user IDs)
+- `RELAY_API_TOKEN` (**required by default**, recommended)
+- `RELAY_ALLOW_NO_AUTH` (`false` default; set `true` only for local dev)
 - `DISCORD_SESSION_ID` (default: `default`)
 - `CLAUDE_AGENT_ID` (default: `claude`)
 - `AUTO_REPLY_PERMISSION_MODE` (`skip` default, or `accept-edits`)
@@ -56,12 +58,21 @@ Optional:
 `npm start` and `npm run start:autoreply` both load values from `.env` automatically.
 Existing exported shell vars still take precedence for one-off overrides.
 
+Security note: `start:autoreply` intentionally loads only worker-safe env vars from `.env` and does **not** pass `DISCORD_BOT_TOKEN` to Claude.
+
 For explicit routing to a specific Claude instance, set both:
 
 ```env
 DISCORD_SESSION_ID=team1
 CLAUDE_AGENT_ID=claude-team1
 ```
+
+### Hardening defaults
+
+- Relay API auth is **required** unless `RELAY_ALLOW_NO_AUTH=true`.
+- Keep `RELAY_HOST=127.0.0.1` unless you intentionally expose relay externally.
+- Restrict channels with `DISCORD_ALLOWED_CHANNEL_IDS`.
+- Optionally restrict users with `ALLOWED_DISCORD_USER_IDS`.
 
 ## 3) Install + start relay
 

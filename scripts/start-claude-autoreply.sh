@@ -3,7 +3,15 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/scripts/load-env.sh"
-load_env_file "$ROOT_DIR/.env"
+# Security: load only worker-safe keys (do NOT load Discord bot token into Claude process)
+load_env_keys "$ROOT_DIR/.env" \
+  DISCORD_SESSION_ID \
+  CLAUDE_AGENT_ID \
+  RELAY_HOST \
+  RELAY_PORT \
+  RELAY_URL \
+  RELAY_API_TOKEN \
+  AUTO_REPLY_PERMISSION_MODE
 
 SETTINGS_PATH="$ROOT_DIR/.claude/settings.json"
 SYSTEM_PROMPT_PATH="$ROOT_DIR/prompts/autoreply-system.md"
@@ -22,6 +30,9 @@ if [ ! -f "$SYSTEM_PROMPT_PATH" ]; then
   echo "Missing prompt file: $SYSTEM_PROMPT_PATH"
   exit 1
 fi
+
+# Defensive cleanup in case parent shell exported relay-only secrets
+unset DISCORD_BOT_TOKEN DISCORD_CHANNEL_ID DISCORD_ALLOWED_CHANNEL_IDS
 
 export PATH="$ROOT_DIR/tools:$PATH"
 export ORCHESTRATOR_DIR="$ROOT_DIR"

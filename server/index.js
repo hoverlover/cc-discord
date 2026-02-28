@@ -26,6 +26,10 @@ const ALLOWED_CHANNEL_IDS = (process.env.DISCORD_ALLOWED_CHANNEL_IDS || '')
   .split(',')
   .map(s => s.trim())
   .filter(Boolean)
+const ALLOWED_DISCORD_USER_IDS = (process.env.ALLOWED_DISCORD_USER_IDS || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean)
 
 const DISCORD_SESSION_ID = process.env.DISCORD_SESSION_ID || 'default'
 const CLAUDE_AGENT_ID = process.env.CLAUDE_AGENT_ID || 'claude'
@@ -33,6 +37,7 @@ const CLAUDE_AGENT_ID = process.env.CLAUDE_AGENT_ID || 'claude'
 const RELAY_HOST = process.env.RELAY_HOST || '127.0.0.1'
 const RELAY_PORT = Number(process.env.RELAY_PORT || 3199)
 const RELAY_API_TOKEN = process.env.RELAY_API_TOKEN || ''
+const RELAY_ALLOW_NO_AUTH = String(process.env.RELAY_ALLOW_NO_AUTH || 'false').toLowerCase() === 'true'
 
 // Discord typing indicator settings (prototype defaults)
 const TYPING_INTERVAL_MS = Number(process.env.TYPING_INTERVAL_MS || 8000)
@@ -47,6 +52,11 @@ if (!DISCORD_BOT_TOKEN) {
 
 if (!DEFAULT_CHANNEL_ID) {
   console.error('Missing DISCORD_CHANNEL_ID (set in .env or env var).')
+  process.exit(1)
+}
+
+if (!RELAY_API_TOKEN && !RELAY_ALLOW_NO_AUTH) {
+  console.error('Missing RELAY_API_TOKEN. Set RELAY_API_TOKEN in .env (recommended), or explicitly set RELAY_ALLOW_NO_AUTH=true for local-only dev.')
   process.exit(1)
 }
 
@@ -95,6 +105,12 @@ function isAllowedChannel(channelId) {
     return ALLOWED_CHANNEL_IDS.includes(channelId)
   }
   return channelId === DEFAULT_CHANNEL_ID
+}
+
+function isAllowedUser(userId) {
+  if (!userId) return false
+  if (ALLOWED_DISCORD_USER_IDS.length === 0) return true
+  return ALLOWED_DISCORD_USER_IDS.includes(userId)
 }
 
 function formatInboundMessage(message) {
@@ -237,6 +253,8 @@ const client = new Client({
 client.once('ready', () => {
   console.log(`[Relay] Discord bot ready as ${client.user?.tag}`)
   console.log(`[Relay] Listening for inbound messages on channel(s): ${ALLOWED_CHANNEL_IDS.length > 0 ? ALLOWED_CHANNEL_IDS.join(', ') : DEFAULT_CHANNEL_ID}`)
+  console.log(`[Relay] User allowlist: ${ALLOWED_DISCORD_USER_IDS.length > 0 ? ALLOWED_DISCORD_USER_IDS.join(', ') : 'disabled (all users in allowed channels)'}`)
+  console.log(`[Relay] API auth: ${RELAY_ALLOW_NO_AUTH ? 'disabled (RELAY_ALLOW_NO_AUTH=true)' : 'required'}`)
   console.log(`[Relay] Typing: interval=${TYPING_INTERVAL_MS}ms, max=${TYPING_MAX_MS}ms, fallback=${THINKING_FALLBACK_ENABLED ? 'on' : 'off'}`)
 })
 
@@ -244,6 +262,10 @@ client.on('messageCreate', (message) => {
   if (!message) return
   if (message.author?.bot) return // avoid loops
   if (!isAllowedChannel(message.channelId)) return
+  if (!isAllowedUser(message.author?.id)) {
+    console.log(`[Relay] Ignoring message from unauthorized user ${message.author?.id}`)
+    return
+  }
   persistInboundDiscordMessage(message)
   // Start typing immediately so users see Claude is working.
   startTypingIndicator(message.channelId)
@@ -267,9 +289,9 @@ app.get('/health', (_req, res) => {
 
 app.post('/api/send', async (req, res) => {
   try {
-    if (RELAY_API_TOKEN) {
+    if (!RELAY_ALLOW_NO_AUTH) {
       const token = req.header('x-api-token') || req.header('authorization')?.replace(/^Bearer\s+/i, '')
-      if (token !== RELAY_API_TOKEN) {
+      if (!token || token !== RELAY_API_TOKEN) {
         res.status(401).json({ success: false, error: 'Unauthorized' })
         return
       }
