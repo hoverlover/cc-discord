@@ -302,13 +302,50 @@ function tokenize(text) {
   )
 }
 
+/**
+ * Generate character trigrams for a token set.
+ * Used for fuzzy matching (typos, near-misses).
+ */
+function trigramSet(tokens) {
+  const trigrams = new Set()
+  for (const tok of tokens) {
+    const padded = `  ${tok} `
+    for (let i = 0; i < padded.length - 2; i++) {
+      trigrams.add(padded.slice(i, i + 3))
+    }
+  }
+  return trigrams
+}
+
+function trigramSimilarity(aTokens, bTokens) {
+  if (!aTokens || !bTokens || aTokens.size === 0 || bTokens.size === 0) return 0
+  const aTri = trigramSet(aTokens)
+  const bTri = trigramSet(bTokens)
+  if (aTri.size === 0 || bTri.size === 0) return 0
+
+  let intersection = 0
+  for (const tri of aTri) {
+    if (bTri.has(tri)) intersection++
+  }
+  const union = aTri.size + bTri.size - intersection
+  return union > 0 ? intersection / union : 0
+}
+
 function tokenOverlapScore(aTokens, bTokens) {
   if (!aTokens || !bTokens || aTokens.size === 0 || bTokens.size === 0) return 0
-  let overlap = 0
+
+  // Exact match component
+  let exactOverlap = 0
   for (const tok of aTokens) {
-    if (bTokens.has(tok)) overlap++
+    if (bTokens.has(tok)) exactOverlap++
   }
-  return overlap / Math.max(1, Math.min(aTokens.size, 10))
+  const exactScore = exactOverlap / Math.max(1, Math.min(aTokens.size, 10))
+
+  // Fuzzy trigram component (catches typos like matterpost/mattermost)
+  const fuzzyScore = trigramSimilarity(aTokens, bTokens)
+
+  // Blend: exact match weighted higher, fuzzy as fallback
+  return Math.max(exactScore, exactScore * 0.7 + fuzzyScore * 0.5)
 }
 
 function jaccard(aTokens, bTokens) {
