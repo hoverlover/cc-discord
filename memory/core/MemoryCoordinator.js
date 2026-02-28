@@ -161,23 +161,101 @@ export class MemoryCoordinator {
       .slice(0, safeMaxCards)
       .map((x) => x.card)
 
-    const recalledTurns = candidateTurns
+    // Build turn index map for adjacency lookups
+    const turnsByIndex = new Map()
+    for (const turn of candidateTurns) {
+      turnsByIndex.set(turn.turnIndex, turn)
+    }
+
+    // Identify rare query tokens (appear in few candidate turns)
+    const tokenFrequency = new Map()
+    const candidateTokenSets = new Map()
+    for (const turn of candidateTurns) {
+      const tokens = tokenize(`${turn.role}: ${turn.content}`)
+      candidateTokenSets.set(turn.id, tokens)
+      for (const tok of tokens) {
+        tokenFrequency.set(tok, (tokenFrequency.get(tok) || 0) + 1)
+      }
+    }
+    const rareQueryTokens = new Set()
+    for (const tok of queryTokens) {
+      const freq = tokenFrequency.get(tok) || 0
+      // Token appears in <20% of turns = rare/specific
+      if (freq > 0 && freq <= Math.max(2, candidateTurns.length * 0.2)) {
+        rareQueryTokens.add(tok)
+      }
+    }
+    // Also check fuzzy matches for rare tokens
+    const rareQueryTrigrams = rareQueryTokens.size > 0 ? trigramSet(rareQueryTokens) : new Set()
+
+    const scoredTurns = candidateTurns
       .filter((turn) => !activeIds.has(String(turn.id)))
       .map((turn) => {
-        const text = `${turn.role}: ${turn.content}`
-        const tokens = tokenize(text)
+        const tokens = candidateTokenSets.get(turn.id) || tokenize(`${turn.role}: ${turn.content}`)
         const overlap = tokenOverlapScore(queryTokens, tokens)
         const novelty = 1 - jaccard(tokens, activeTokens)
         const recency = turn.turnIndex / Math.max(1, candidateTurns.length)
         const negationPenalty = isNegationTurn(turn.content) ? 0.6 : 1.0
-        const score = (overlap * 1.0 + novelty * 0.4 + recency * 0.1) * negationPenalty
+
+        // Rare keyword boost: if turn contains a rare query term (exact or fuzzy), boost it
+        let rareBoost = 0
+        if (rareQueryTokens.size > 0) {
+          for (const tok of tokens) {
+            if (rareQueryTokens.has(tok)) { rareBoost = 0.3; break }
+          }
+          // Fuzzy check via trigrams if no exact match
+          if (rareBoost === 0 && rareQueryTrigrams.size > 0) {
+            const turnTrigrams = trigramSet(tokens)
+            let triIntersect = 0
+            for (const tri of rareQueryTrigrams) {
+              if (turnTrigrams.has(tri)) triIntersect++
+            }
+            const triUnion = rareQueryTrigrams.size + turnTrigrams.size - triIntersect
+            const sim = triUnion > 0 ? triIntersect / triUnion : 0
+            if (sim > 0.15) rareBoost = 0.2
+          }
+        }
+
+        const score = (overlap * 1.0 + novelty * 0.4 + recency * 0.1 + rareBoost) * negationPenalty
         return { turn, score }
       })
-      .filter((x) => x.score > 0.45)
+      .filter((x) => x.score > 0.40)
       .sort((a, b) => b.score - a.score)
-      .slice(0, safeMaxRecallTurns)
-      .map((x) => x.turn)
-      .sort((a, b) => a.turnIndex - b.turnIndex)
+
+    // Select top turns, then expand with adjacent response turns (conversation threading)
+    const selectedIds = new Set()
+    const selectedTurns = []
+
+    for (const { turn } of scoredTurns) {
+      if (selectedTurns.length >= safeMaxRecallTurns) break
+      if (selectedIds.has(turn.id)) continue
+
+      selectedIds.add(turn.id)
+      selectedTurns.push(turn)
+
+      // If this is a user turn, pull the next assistant turn (the actual response)
+      if (turn.role === 'user' && selectedTurns.length < safeMaxRecallTurns) {
+        const nextTurn = turnsByIndex.get(turn.turnIndex + 1)
+        if (nextTurn && nextTurn.role === 'assistant' && !activeIds.has(String(nextTurn.id)) && !selectedIds.has(nextTurn.id)) {
+          // Only include if not a negation turn
+          if (!isNegationTurn(nextTurn.content)) {
+            selectedIds.add(nextTurn.id)
+            selectedTurns.push(nextTurn)
+          }
+        }
+      }
+
+      // If this is an assistant turn, pull the preceding user turn for context
+      if (turn.role === 'assistant' && selectedTurns.length < safeMaxRecallTurns) {
+        const prevTurn = turnsByIndex.get(turn.turnIndex - 1)
+        if (prevTurn && prevTurn.role === 'user' && !activeIds.has(String(prevTurn.id)) && !selectedIds.has(prevTurn.id)) {
+          selectedIds.add(prevTurn.id)
+          selectedTurns.push(prevTurn)
+        }
+      }
+    }
+
+    const recalledTurns = selectedTurns.sort((a, b) => a.turnIndex - b.turnIndex)
 
     return {
       sessionKey,
