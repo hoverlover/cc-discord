@@ -21,7 +21,7 @@ export class MemoryCoordinator {
     this.defaults = {
       activeWindowSize: 12,
       maxCards: 6,
-      maxRecallTurns: 4,
+      maxRecallTurns: 8,
       maxTurnScan: 400,
       ...(options.defaults || {}),
     }
@@ -169,7 +169,8 @@ export class MemoryCoordinator {
         const overlap = tokenOverlapScore(queryTokens, tokens)
         const novelty = 1 - jaccard(tokens, activeTokens)
         const recency = turn.turnIndex / Math.max(1, candidateTurns.length)
-        const score = overlap * 1.0 + novelty * 0.4 + recency * 0.1
+        const negationPenalty = isNegationTurn(turn.content) ? 0.6 : 1.0
+        const score = (overlap * 1.0 + novelty * 0.4 + recency * 0.1) * negationPenalty
         return { turn, score }
       })
       .filter((x) => x.score > 0.45)
@@ -359,6 +360,26 @@ function jaccard(aTokens, bTokens) {
 
   const union = aTokens.size + bTokens.size - intersection
   return union > 0 ? intersection / union : 0
+}
+
+/**
+ * Detect "I don't know/remember" meta-turns that contain query terms
+ * but carry no actual information. These get penalized in scoring.
+ */
+const NEGATION_PATTERNS = [
+  /\bdon'?t have (the |any )?(specific )?(details|context|record|information|memory)\b/i,
+  /\bdon'?t (remember|recall|know)\b/i,
+  /\bunfortunately.{0,40}(don'?t|no |not ).{0,30}(context|detail|record|memory|information)\b/i,
+  /\bmy memory.{0,30}(limited|doesn'?t|does not)\b/i,
+  /\bcould you remind me\b/i,
+  /\bcan'?t recall\b/i,
+  /\bno record of\b/i,
+  /\bbefore my.{0,20}(memory|persistent|context)\b/i,
+]
+
+function isNegationTurn(content) {
+  const text = String(content || '')
+  return NEGATION_PATTERNS.some((p) => p.test(text))
 }
 
 function truncate(text, maxLen) {

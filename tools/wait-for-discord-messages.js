@@ -176,7 +176,7 @@ async function buildMemoryContext(queryText) {
       avoidCurrentRuntime: true,
       activeWindowSize: 12,
       maxCards: 6,
-      maxRecallTurns: 4,
+      maxRecallTurns: 8,
       maxTurnScan: 300,
     })
 
