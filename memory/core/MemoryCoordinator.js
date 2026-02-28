@@ -195,7 +195,7 @@ export class MemoryCoordinator {
         const overlap = tokenOverlapScore(queryTokens, tokens)
         const novelty = 1 - jaccard(tokens, activeTokens)
         const recency = turn.turnIndex / Math.max(1, candidateTurns.length)
-        const negationPenalty = isNegationTurn(turn.content) ? 0.6 : 1.0
+        const negationPenalty = isNegationTurn(turn.content) ? 0.3 : 1.0
 
         // Rare keyword boost: if turn contains a rare query term (exact or fuzzy), boost it
         let rareBoost = 0
@@ -216,17 +216,32 @@ export class MemoryCoordinator {
           }
         }
 
-        const score = (overlap * 1.0 + novelty * 0.4 + recency * 0.1 + rareBoost) * negationPenalty
+        // Novelty only contributes when there's some keyword signal.
+        // Without overlap or rareBoost, novelty alone shouldn't qualify a turn.
+        const hasKeywordSignal = overlap > 0.05 || rareBoost > 0
+        const effectiveNovelty = hasKeywordSignal ? novelty * 0.4 : 0
+
+        const score = (overlap * 1.0 + effectiveNovelty + recency * 0.1 + rareBoost) * negationPenalty
         return { turn, score }
       })
       .filter((x) => x.score > 0.40)
       .sort((a, b) => b.score - a.score)
 
+    // Deduplicate near-identical turns (e.g. user asking the same question repeatedly)
+    const deduped = []
+    const seenContentHashes = new Set()
+    for (const scored of scoredTurns) {
+      const hash = contentHash(scored.turn.content)
+      if (seenContentHashes.has(hash)) continue
+      seenContentHashes.add(hash)
+      deduped.push(scored)
+    }
+
     // Select top turns, then expand with adjacent response turns (conversation threading)
     const selectedIds = new Set()
     const selectedTurns = []
 
-    for (const { turn } of scoredTurns) {
+    for (const { turn } of deduped) {
       if (selectedTurns.length >= safeMaxRecallTurns) break
       if (selectedIds.has(turn.id)) continue
 
@@ -371,13 +386,31 @@ function isTurnInActiveRuntimeWindow(turn, runtimeState, compactedCutoff) {
   return turn.turnIndex > compactedCutoff.turnIndex
 }
 
+const STOP_WORDS = new Set([
+  'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'any', 'can', 'has', 'her',
+  'his', 'how', 'its', 'may', 'our', 'out', 'was', 'who', 'did', 'get', 'got', 'had',
+  'him', 'let', 'say', 'she', 'too', 'use', 'yes', 'yet', 'been', 'each', 'have',
+  'from', 'into', 'just', 'like', 'make', 'many', 'more', 'most', 'much', 'must',
+  'name', 'only', 'over', 'such', 'take', 'than', 'that', 'them', 'then', 'they',
+  'this', 'very', 'what', 'when', 'will', 'with', 'your', 'also', 'back', 'been',
+  'come', 'could', 'does', 'don', 'dont', 'even', 'give', 'goes', 'gone', 'good',
+  'here', 'high', 'keep', 'know', 'last', 'long', 'look', 'made', 'some', 'sure',
+  'tell', 'told', 'want', 'well', 'were', 'which', 'would', 'about', 'after',
+  'again', 'being', 'below', 'could', 'every', 'first', 'found', 'going',
+  'great', 'might', 'never', 'other', 'right', 'shall', 'since', 'still',
+  'their', 'there', 'these', 'thing', 'think', 'those', 'until', 'where',
+  'while', 'would', 'should', 'really', 'before', 'because', 'between',
+  'time', 'one', 'more', 'see', 'now', 'way', 'new', 'said', 'asked',
+  'user', 'assistant', 'hoverlover617',
+])
+
 function tokenize(text) {
   return new Set(
     String(text || '')
       .toLowerCase()
       .replace(/[^a-z0-9\s]/g, ' ')
       .split(/\s+/)
-      .filter((t) => t.length > 2),
+      .filter((t) => t.length > 2 && !STOP_WORDS.has(t)),
   )
 }
 
@@ -458,6 +491,17 @@ const NEGATION_PATTERNS = [
 function isNegationTurn(content) {
   const text = String(content || '')
   return NEGATION_PATTERNS.some((p) => p.test(text))
+}
+
+/**
+ * Simple content hash for deduplication.
+ * Normalizes whitespace/punctuation and takes first ~100 significant chars.
+ */
+function contentHash(content) {
+  return String(content || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .slice(0, 100)
 }
 
 function truncate(text, maxLen) {
