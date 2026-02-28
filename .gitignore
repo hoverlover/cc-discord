@@ -1,5 +1,7 @@
 node_modules/
 .env
+.env.relay
+.env.worker
 .claude/settings.json
 data/
 logs/

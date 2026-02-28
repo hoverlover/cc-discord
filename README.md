@@ -30,42 +30,54 @@ Quick-and-dirty **Discord ↔ Claude Code** relay using the same hook concept as
 4. Copy bot token
 5. Invite bot to your server with permissions to read/send in your target channel
 
-## 2) Configure env
+## 2) Configure env (split relay/worker files)
 
 ```bash
-cp .env.example .env
+cp .env.relay.example .env.relay
+cp .env.worker.example .env.worker
 ```
 
-Set at least:
+### Required in `.env.relay`
 
 - `DISCORD_BOT_TOKEN`
 - `DISCORD_CHANNEL_ID`
-
-Optional:
-
-- `DISCORD_ALLOWED_CHANNEL_IDS` (comma list)
-- `ALLOWED_DISCORD_USER_IDS` (comma list of user IDs)
 - `RELAY_API_TOKEN` (**required by default**, recommended)
-- `RELAY_ALLOW_NO_AUTH` (`false` default; set `true` only for local dev)
-- `DISCORD_SESSION_ID` (default: `default`)
-- `CLAUDE_AGENT_ID` (default: `claude`)
-- `AUTO_REPLY_PERMISSION_MODE` (`skip` default, or `accept-edits`)
-- `TYPING_INTERVAL_MS` (default: `8000`)
-- `TYPING_MAX_MS` (default: `120000`)
-- `THINKING_FALLBACK_ENABLED` (default: `true`)
-- `THINKING_FALLBACK_TEXT` (default: `Still working on that—thanks for your patience.`)
 
-`npm start` and `npm run start:autoreply` both load values from `.env` automatically.
-Existing exported shell vars still take precedence for one-off overrides.
+### Required in `.env.worker`
 
-Security note: `start:autoreply` intentionally loads only worker-safe env vars from `.env` and does **not** pass `DISCORD_BOT_TOKEN` to Claude.
+- `DISCORD_SESSION_ID`
+- `CLAUDE_AGENT_ID`
+- `RELAY_API_TOKEN` (must match relay token when auth is enabled)
 
-For explicit routing to a specific Claude instance, set both:
+### Important: routing values must match across files
+
+Set the same values in both files:
 
 ```env
 DISCORD_SESSION_ID=team1
 CLAUDE_AGENT_ID=claude-team1
 ```
+
+### Optional settings
+
+Relay-side (`.env.relay`):
+- `DISCORD_ALLOWED_CHANNEL_IDS` (comma list)
+- `ALLOWED_DISCORD_USER_IDS` (comma list of user IDs)
+- `RELAY_ALLOW_NO_AUTH` (`false` default; set `true` only for local dev)
+- `TYPING_INTERVAL_MS` (default: `8000`)
+- `TYPING_MAX_MS` (default: `120000`)
+- `THINKING_FALLBACK_ENABLED` (default: `true`)
+- `THINKING_FALLBACK_TEXT` (default: `Still working on that—thanks for your patience.`)
+
+Worker-side (`.env.worker`):
+- `RELAY_HOST` / `RELAY_PORT` (or `RELAY_URL`)
+- `AUTO_REPLY_PERMISSION_MODE` (`skip` default, or `accept-edits`)
+
+`npm start` loads `.env.relay` and `npm run start:autoreply` loads `.env.worker`.
+Legacy single-file `.env` is still supported as fallback.
+Existing exported shell vars still take precedence for one-off overrides.
+
+Security note: `start:autoreply` intentionally loads only worker-safe env vars and does **not** pass `DISCORD_BOT_TOKEN` to Claude.
 
 ### Hardening defaults
 

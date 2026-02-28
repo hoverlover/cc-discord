@@ -18,6 +18,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT_DIR = join(__dirname, '..')
 const DATA_DIR = join(ROOT_DIR, 'data')
 
+// Preferred split env file for relay process; keep legacy fallback for compatibility.
+loadDotEnv(join(ROOT_DIR, '.env.relay'))
 loadDotEnv(join(ROOT_DIR, '.env'))
 
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN
@@ -46,17 +48,17 @@ const THINKING_FALLBACK_ENABLED = String(process.env.THINKING_FALLBACK_ENABLED |
 const THINKING_FALLBACK_TEXT = process.env.THINKING_FALLBACK_TEXT || 'Still working on that—thanks for your patience.'
 
 if (!DISCORD_BOT_TOKEN) {
-  console.error('Missing DISCORD_BOT_TOKEN (set in .env or env var).')
+  console.error('Missing DISCORD_BOT_TOKEN (set in .env.relay or env var).')
   process.exit(1)
 }
 
 if (!DEFAULT_CHANNEL_ID) {
-  console.error('Missing DISCORD_CHANNEL_ID (set in .env or env var).')
+  console.error('Missing DISCORD_CHANNEL_ID (set in .env.relay or env var).')
   process.exit(1)
 }
 
 if (!RELAY_API_TOKEN && !RELAY_ALLOW_NO_AUTH) {
-  console.error('Missing RELAY_API_TOKEN. Set RELAY_API_TOKEN in .env (recommended), or explicitly set RELAY_ALLOW_NO_AUTH=true for local-only dev.')
+  console.error('Missing RELAY_API_TOKEN. Set RELAY_API_TOKEN in .env.relay (recommended), or explicitly set RELAY_ALLOW_NO_AUTH=true for local-only dev.')
   process.exit(1)
 }
 

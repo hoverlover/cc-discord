@@ -3,15 +3,21 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/scripts/load-env.sh"
-# Security: load only worker-safe keys (do NOT load Discord bot token into Claude process)
-load_env_keys "$ROOT_DIR/.env" \
-  DISCORD_SESSION_ID \
-  CLAUDE_AGENT_ID \
-  RELAY_HOST \
-  RELAY_PORT \
-  RELAY_URL \
-  RELAY_API_TOKEN \
+
+WORKER_KEYS=(
+  DISCORD_SESSION_ID
+  CLAUDE_AGENT_ID
+  RELAY_HOST
+  RELAY_PORT
+  RELAY_URL
+  RELAY_API_TOKEN
   AUTO_REPLY_PERMISSION_MODE
+)
+
+# Preferred split env file for worker process
+load_env_keys "$ROOT_DIR/.env.worker" "${WORKER_KEYS[@]}"
+# Legacy fallback (single-file mode)
+load_env_keys "$ROOT_DIR/.env" "${WORKER_KEYS[@]}"
 
 SETTINGS_PATH="$ROOT_DIR/.claude/settings.json"
 SYSTEM_PROMPT_PATH="$ROOT_DIR/prompts/autoreply-system.md"
