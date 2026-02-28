@@ -1,0 +1,17 @@
+{
+  "name": "cc-discord",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Quick prototype: Discord <-> Claude Code relay using hook-delivered messages",
+  "scripts": {
+    "start": "bash scripts/start-relay.sh",
+    "dev": "bash scripts/start-relay.sh",
+    "generate-settings": "bash scripts/generate-settings.sh",
+    "start:autoreply": "bash scripts/start-claude-autoreply.sh"
+  },
+  "dependencies": {
+    "discord.js": "^14.23.2",
+    "express": "^4.21.2"
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__ORCHESTRATOR_DIR__/hooks/check-discord-messages.js"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__ORCHESTRATOR_DIR__/hooks/check-discord-messages.js"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__ORCHESTRATOR_DIR__/hooks/check-discord-messages.js"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__ORCHESTRATOR_DIR__/hooks/check-discord-messages.js"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(send-discord:*)",
+      "Bash(wait-for-discord-messages:*)"
+    ]
+  }
+}
