@@ -58,8 +58,12 @@ for (let i = 0; i < args.length; i++) {
 }
 
 const dbPath = join(ROOT_DIR, 'data', 'messages.db')
-const baseRole = agentId.replace(/-\d+$/, '')
-const targets = [...new Set([agentId, baseRole, 'claude'])]
+// When agent ID is a numeric channel ID (subagent mode), only match that exact ID.
+// Otherwise use the legacy multi-target matching.
+const isChannelAgent = /^\d{15,22}$/.test(agentId)
+const targets = isChannelAgent
+  ? [agentId]
+  : [...new Set([agentId, agentId.replace(/-\d+$/, ''), 'claude'])]
 const placeholders = targets.map(() => '?').join(',')
 
 const noopLogger = {

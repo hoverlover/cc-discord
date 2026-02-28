@@ -65,6 +65,11 @@ function resolveModelAlias(input) {
 const DISCORD_SESSION_ID = process.env.DISCORD_SESSION_ID || 'default'
 const CLAUDE_AGENT_ID = process.env.CLAUDE_AGENT_ID || 'claude'
 
+// Message routing mode:
+// - 'channel' (default): route inbound messages to to_agent=channelId (for orchestrator/subagent mode)
+// - 'agent': route to to_agent=CLAUDE_AGENT_ID (legacy single-agent mode)
+const MESSAGE_ROUTING_MODE = String(process.env.MESSAGE_ROUTING_MODE || 'channel').toLowerCase().trim()
+
 const RELAY_HOST = process.env.RELAY_HOST || '127.0.0.1'
 const RELAY_PORT = Number(process.env.RELAY_PORT || 3199)
 const RELAY_API_TOKEN = process.env.RELAY_API_TOKEN || ''
@@ -311,12 +316,15 @@ function formatInboundMessage(message) {
 
 function persistInboundDiscordMessage(message) {
   const normalizedContent = formatInboundMessage(message)
+  // In channel mode, route to channelId so per-channel subagents consume independently.
+  // In agent mode (legacy), route to CLAUDE_AGENT_ID for single-agent consumption.
+  const targetAgent = MESSAGE_ROUTING_MODE === 'agent' ? CLAUDE_AGENT_ID : message.channelId
 
   try {
     insertStmt.run(
       DISCORD_SESSION_ID,
       `discord:${message.author?.id || 'unknown'}`,
-      CLAUDE_AGENT_ID,
+      targetAgent,
       'DISCORD_MESSAGE',
       normalizedContent,
       'discord',
@@ -336,7 +344,7 @@ function persistInboundDiscordMessage(message) {
       },
     })
 
-    console.log(`[Relay] queued Discord message ${message.id} -> ${CLAUDE_AGENT_ID}`)
+    console.log(`[Relay] queued Discord message ${message.id} -> ${targetAgent}`)
   } catch (err) {
     const msg = String(err?.message || '')
     if (msg.includes('UNIQUE constraint failed')) {
@@ -463,6 +471,7 @@ client.once('ready', async () => {
   console.log(`[Relay] Listening for inbound messages on channel(s): ${ALLOWED_CHANNEL_IDS.length > 0 ? ALLOWED_CHANNEL_IDS.join(', ') : DEFAULT_CHANNEL_ID}`)
   console.log(`[Relay] User allowlist: ${ALLOWED_DISCORD_USER_IDS.length > 0 ? ALLOWED_DISCORD_USER_IDS.join(', ') : 'disabled (all users in allowed channels)'}`)
   console.log(`[Relay] API auth: ${RELAY_ALLOW_NO_AUTH ? 'disabled (RELAY_ALLOW_NO_AUTH=true)' : 'required'}`)
+  console.log(`[Relay] Message routing: ${MESSAGE_ROUTING_MODE} mode`)
   console.log(`[Relay] Busy queue notify: ${BUSY_NOTIFY_ON_QUEUE ? `on (cooldown=${BUSY_NOTIFY_COOLDOWN_MS}ms)` : 'off'}`)
   console.log(`[Relay] Typing: interval=${TYPING_INTERVAL_MS}ms, max=${TYPING_MAX_MS}ms, fallback=${THINKING_FALLBACK_ENABLED ? 'on' : 'off'}`)
 
