@@ -142,7 +142,7 @@ async function appendMemoryTurn({ role, content, metadata = {} }) {
   try {
     const runtimeState = await memoryStore.readRuntimeState(memorySessionKey)
 
-    await memory.appendTurn({
+    const result = await memory.appendTurn({
       sessionKey: memorySessionKey,
       agentId: CLAUDE_AGENT_ID,
       role,
@@ -153,6 +153,7 @@ async function appendMemoryTurn({ role, content, metadata = {} }) {
         runtimeEpoch: runtimeState?.runtimeEpoch || null,
       },
     })
+    console.log(`[Memory] persisted ${role} turn (batch=${result?.batchId}, turns=${result?.counts?.turns})`)
   } catch (err) {
     console.error('[Memory] failed to persist turn:', err.message)
   }
