@@ -12,6 +12,13 @@ WORKER_KEYS=(
   RELAY_URL
   RELAY_API_TOKEN
   AUTO_REPLY_PERMISSION_MODE
+  CLAUDE_RUNTIME_ID
+  WAIT_QUIET_TIMEOUT
+  BASH_POLICY_MODE
+  ALLOW_BASH_RUN_IN_BACKGROUND
+  ALLOW_BASH_BACKGROUND_OPS
+  BASH_POLICY_NOTIFY_ON_BLOCK
+  BASH_POLICY_NOTIFY_CHANNEL_ID
 )
 
 # Preferred split env file for worker process
@@ -43,6 +50,7 @@ unset DISCORD_BOT_TOKEN DISCORD_CHANNEL_ID DISCORD_ALLOWED_CHANNEL_IDS
 export PATH="$ROOT_DIR/tools:$PATH"
 export ORCHESTRATOR_DIR="$ROOT_DIR"
 export DISCORD_SESSION_ID="${DISCORD_SESSION_ID:-default}"
+export CLAUDE_RUNTIME_ID="${CLAUDE_RUNTIME_ID:-rt_$(date +%s)_$RANDOM}"
 
 # Routing identity for this Claude instance:
 # - AGENT_ID is what hooks/tools use while running
@@ -64,7 +72,7 @@ else
   PERMISSION_ARGS=(--dangerously-skip-permissions)
 fi
 
-echo "Starting Claude auto-reply mode (session=$DISCORD_SESSION_ID, agent=$AGENT_ID, permission_mode=${AUTO_REPLY_PERMISSION_MODE:-skip})..."
+echo "Starting Claude auto-reply mode (session=$DISCORD_SESSION_ID, agent=$AGENT_ID, runtime=$CLAUDE_RUNTIME_ID, permission_mode=${AUTO_REPLY_PERMISSION_MODE:-skip})..."
 exec claude \
   --settings "$SETTINGS_PATH" \
   "${PERMISSION_ARGS[@]}" \

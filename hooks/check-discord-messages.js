@@ -16,6 +16,9 @@ process.emit = function (event, ...args) {
 import { DatabaseSync } from 'node:sqlite'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { SqliteMemoryStore } from '../memory/providers/sqlite/SqliteMemoryStore.js'
+import { MemoryCoordinator } from '../memory/core/MemoryCoordinator.js'
+import { buildMemorySessionKey } from '../memory/core/session-key.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT_DIR = process.env.ORCHESTRATOR_DIR || join(__dirname, '..')
@@ -29,6 +32,82 @@ const sessionId =
 
 const dbPath = join(ROOT_DIR, 'data', 'messages.db')
 
+const noopLogger = {
+  log() {},
+  warn() {},
+  error() {},
+}
+
+async function syncRuntimeContext({ hookEvent, hookInput }) {
+  const memoryDbPath = join(ROOT_DIR, 'data', 'memory.db')
+  const memorySessionKey = buildMemorySessionKey({ sessionId, agentId })
+  const runtimeHint =
+    process.env.CLAUDE_RUNTIME_ID ||
+    hookInput?.session_id ||
+    hookInput?.sessionId ||
+    null
+
+  let store
+  try {
+    store = new SqliteMemoryStore({ dbPath: memoryDbPath, logger: noopLogger })
+    const coordinator = new MemoryCoordinator({ store, logger: noopLogger })
+    await coordinator.init()
+
+    if (hookEvent === 'SessionStart') {
+      return await coordinator.beginNewRuntimeContext({
+        sessionKey: memorySessionKey,
+        runtimeContextId: runtimeHint
+          ? `${runtimeHint}_start_${Date.now().toString(36)}`
+          : null,
+      })
+    }
+
+    return await coordinator.ensureRuntimeContext({
+      sessionKey: memorySessionKey,
+      runtimeContextId: runtimeHint,
+    })
+  } catch {
+    return null
+  } finally {
+    if (store) {
+      try { await store.close() } catch { /* ignore */ }
+    }
+  }
+}
+
+async function buildMemoryContext({ queryText, runtimeState }) {
+  const memoryDbPath = join(ROOT_DIR, 'data', 'memory.db')
+  const memorySessionKey = buildMemorySessionKey({ sessionId, agentId })
+
+  let store
+  try {
+    store = new SqliteMemoryStore({ dbPath: memoryDbPath, logger: noopLogger })
+    const coordinator = new MemoryCoordinator({ store, logger: noopLogger })
+    await coordinator.init()
+
+    const packet = await coordinator.assembleContext({
+      sessionKey: memorySessionKey,
+      queryText,
+      runtimeContextId: runtimeState?.runtimeContextId || null,
+      runtimeEpoch: runtimeState?.runtimeEpoch || null,
+      includeSnapshot: true,
+      avoidCurrentRuntime: true,
+      activeWindowSize: 12,
+      maxCards: 6,
+      maxRecallTurns: 4,
+      maxTurnScan: 300,
+    })
+
+    return coordinator.formatContextPacket(packet)
+  } catch {
+    return ''
+  } finally {
+    if (store) {
+      try { await store.close() } catch { /* ignore */ }
+    }
+  }
+}
+
 let hookInput
 try {
   const chunks = []
@@ -40,6 +119,7 @@ try {
 }
 
 const hookEvent = hookInput.hook_event_name || 'PostToolUse'
+const runtimeState = await syncRuntimeContext({ hookEvent, hookInput })
 
 // Match direct agent IDs, generic "claude", and optionally base role
 const baseRole = agentId.replace(/-\d+$/, '')
@@ -75,7 +155,14 @@ try {
       const oneLine = String(r.content).replace(/\r/g, '').replace(/\n/g, ' ')
       return `[MESSAGE from ${r.from_agent}] [${r.message_type}]: ${oneLine}`
     })
-    const contextText = `NEW DISCORD MESSAGE(S): ${formatted.join(' | ')}`
+    const inboxText = `NEW DISCORD MESSAGE(S): ${formatted.join(' | ')}`
+
+    const latestQueryText = String(rows[rows.length - 1]?.content || '')
+    const memoryText = await buildMemoryContext({
+      queryText: latestQueryText,
+      runtimeState,
+    })
+    const contextText = memoryText ? `${inboxText}\n\n${memoryText}` : inboxText
 
     if (hookEvent === 'Stop') {
       process.stdout.write(JSON.stringify({

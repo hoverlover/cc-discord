@@ -13,6 +13,9 @@ import { DatabaseSync } from 'node:sqlite'
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { SqliteMemoryStore } from '../memory/providers/sqlite/SqliteMemoryStore.js'
+import { MemoryCoordinator } from '../memory/core/MemoryCoordinator.js'
+import { buildMemorySessionKey } from '../memory/core/session-key.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT_DIR = join(__dirname, '..')
@@ -47,6 +50,10 @@ const TYPING_MAX_MS = Number(process.env.TYPING_MAX_MS || 120000)
 const THINKING_FALLBACK_ENABLED = String(process.env.THINKING_FALLBACK_ENABLED || 'true').toLowerCase() !== 'false'
 const THINKING_FALLBACK_TEXT = process.env.THINKING_FALLBACK_TEXT || 'Still working on that—thanks for your patience.'
 
+// Busy-queue notifications when Claude is blocked on another tool
+const BUSY_NOTIFY_ON_QUEUE = String(process.env.BUSY_NOTIFY_ON_QUEUE || 'true').toLowerCase() !== 'false'
+const BUSY_NOTIFY_COOLDOWN_MS = Number(process.env.BUSY_NOTIFY_COOLDOWN_MS || 30000)
+
 if (!DISCORD_BOT_TOKEN) {
   console.error('Missing DISCORD_BOT_TOKEN (set in .env.relay or env var).')
   process.exit(1)
@@ -80,11 +87,24 @@ db.exec(`
     read INTEGER DEFAULT 0
   );
 
+  CREATE TABLE IF NOT EXISTS agent_activity (
+    session_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'idle',
+    activity_type TEXT,
+    activity_summary TEXT,
+    started_at TEXT,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (session_id, agent_id)
+  );
+
   CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
   CREATE INDEX IF NOT EXISTS idx_messages_to_agent ON messages(to_agent);
   CREATE INDEX IF NOT EXISTS idx_messages_read ON messages(read);
   CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_source_external
     ON messages(source, external_id);
+  CREATE INDEX IF NOT EXISTS idx_agent_activity_status
+    ON agent_activity(status);
 `)
 
 const insertStmt = db.prepare(`
@@ -101,6 +121,43 @@ const insertStmt = db.prepare(`
   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `)
 
+const memorySessionKey = buildMemorySessionKey({
+  sessionId: DISCORD_SESSION_ID,
+  agentId: CLAUDE_AGENT_ID,
+})
+
+const memoryStore = new SqliteMemoryStore({
+  dbPath: join(DATA_DIR, 'memory.db'),
+  logger: console,
+})
+
+const memory = new MemoryCoordinator({
+  store: memoryStore,
+  logger: console,
+})
+
+await memory.init()
+
+async function appendMemoryTurn({ role, content, metadata = {} }) {
+  try {
+    const runtimeState = await memoryStore.readRuntimeState(memorySessionKey)
+
+    await memory.appendTurn({
+      sessionKey: memorySessionKey,
+      agentId: CLAUDE_AGENT_ID,
+      role,
+      content,
+      metadata: {
+        ...metadata,
+        runtimeContextId: runtimeState?.runtimeContextId || null,
+        runtimeEpoch: runtimeState?.runtimeEpoch || null,
+      },
+    })
+  } catch (err) {
+    console.error('[Memory] failed to persist turn:', err.message)
+  }
+}
+
 function isAllowedChannel(channelId) {
   if (!channelId) return false
   if (ALLOWED_CHANNEL_IDS.length > 0) {
@@ -113,6 +170,63 @@ function isAllowedUser(userId) {
   if (!userId) return false
   if (ALLOWED_DISCORD_USER_IDS.length === 0) return true
   return ALLOWED_DISCORD_USER_IDS.includes(userId)
+}
+
+function getCurrentAgentActivity() {
+  try {
+    return db.prepare(`
+      SELECT status, activity_type, activity_summary, started_at, updated_at
+      FROM agent_activity
+      WHERE session_id = ? AND agent_id = ?
+      LIMIT 1
+    `).get(DISCORD_SESSION_ID, CLAUDE_AGENT_ID)
+  } catch {
+    return null
+  }
+}
+
+function isWaitActivity(row) {
+  const text = `${row?.activity_type || ''} ${row?.activity_summary || ''}`.toLowerCase()
+  return text.includes('wait-for-discord-messages')
+}
+
+function truncateText(value, maxLen = 140) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim()
+  if (text.length <= maxLen) return text
+  return `${text.slice(0, maxLen - 1)}…`
+}
+
+function maybeNotifyBusyQueued(message) {
+  if (!BUSY_NOTIFY_ON_QUEUE) return
+
+  const activity = getCurrentAgentActivity()
+  if (!activity || activity.status !== 'busy') return
+  if (isWaitActivity(activity)) return
+
+  const activityKey = `${message.channelId}:${activity.started_at || activity.updated_at || activity.activity_summary || activity.activity_type || 'busy'}`
+  const now = Date.now()
+  const lastSent = busyQueueNotifyCache.get(activityKey) || 0
+  if (now - lastSent < BUSY_NOTIFY_COOLDOWN_MS) return
+  busyQueueNotifyCache.set(activityKey, now)
+
+  const summary = truncateText(activity.activity_summary || activity.activity_type || 'another task')
+  const content = `⏳ Currently busy with: \`${summary}\`\nI queued your message and will reply when done.`
+
+  void (async () => {
+    try {
+      const channel = await client.channels.fetch(message.channelId)
+      if (!channel || !channel.isTextBased()) return
+      const sent = await channel.send(content)
+      persistOutboundDiscordMessage({
+        content,
+        channelId: message.channelId,
+        externalId: sent.id,
+        fromAgent: 'relay',
+      })
+    } catch {
+      // best effort only
+    }
+  })()
 }
 
 function formatInboundMessage(message) {
@@ -134,18 +248,31 @@ function formatInboundMessage(message) {
 }
 
 function persistInboundDiscordMessage(message) {
+  const normalizedContent = formatInboundMessage(message)
+
   try {
     insertStmt.run(
       DISCORD_SESSION_ID,
       `discord:${message.author?.id || 'unknown'}`,
       CLAUDE_AGENT_ID,
       'DISCORD_MESSAGE',
-      formatInboundMessage(message),
+      normalizedContent,
       'discord',
       message.id,
       message.channelId,
       0
     )
+
+    void appendMemoryTurn({
+      role: 'user',
+      content: normalizedContent,
+      metadata: {
+        source: 'discord',
+        messageId: message.id,
+        channelId: message.channelId,
+        authorId: message.author?.id || null,
+      },
+    })
 
     console.log(`[Relay] queued Discord message ${message.id} -> ${CLAUDE_AGENT_ID}`)
   } catch (err) {
@@ -159,18 +286,33 @@ function persistInboundDiscordMessage(message) {
 }
 
 function persistOutboundDiscordMessage({ content, channelId, externalId, fromAgent }) {
+  const normalizedContent = String(content)
+  const normalizedFromAgent = fromAgent || CLAUDE_AGENT_ID
+  const normalizedChannelId = channelId || DEFAULT_CHANNEL_ID
+
   try {
     insertStmt.run(
       DISCORD_SESSION_ID,
-      fromAgent || CLAUDE_AGENT_ID,
+      normalizedFromAgent,
       'discord',
       'DISCORD_REPLY',
-      String(content),
+      normalizedContent,
       'relay-outbound',
       externalId || null,
-      channelId || DEFAULT_CHANNEL_ID,
+      normalizedChannelId,
       1
     )
+
+    void appendMemoryTurn({
+      role: 'assistant',
+      content: normalizedContent,
+      metadata: {
+        source: 'discord',
+        messageId: externalId || null,
+        channelId: normalizedChannelId,
+        fromAgent: normalizedFromAgent,
+      },
+    })
   } catch (err) {
     console.error('[Relay] failed to persist outbound message:', err.message)
   }
@@ -178,6 +320,8 @@ function persistOutboundDiscordMessage({ content, channelId, externalId, fromAge
 
 // Channel typing state: channelId -> { interval, timeout }
 const typingSessions = new Map()
+// Deduplicate busy queue notifications per activity window
+const busyQueueNotifyCache = new Map()
 
 async function sendTypingOnce(channelId) {
   if (!channelId || !client.user) return
@@ -257,6 +401,7 @@ client.once('ready', () => {
   console.log(`[Relay] Listening for inbound messages on channel(s): ${ALLOWED_CHANNEL_IDS.length > 0 ? ALLOWED_CHANNEL_IDS.join(', ') : DEFAULT_CHANNEL_ID}`)
   console.log(`[Relay] User allowlist: ${ALLOWED_DISCORD_USER_IDS.length > 0 ? ALLOWED_DISCORD_USER_IDS.join(', ') : 'disabled (all users in allowed channels)'}`)
   console.log(`[Relay] API auth: ${RELAY_ALLOW_NO_AUTH ? 'disabled (RELAY_ALLOW_NO_AUTH=true)' : 'required'}`)
+  console.log(`[Relay] Busy queue notify: ${BUSY_NOTIFY_ON_QUEUE ? `on (cooldown=${BUSY_NOTIFY_COOLDOWN_MS}ms)` : 'off'}`)
   console.log(`[Relay] Typing: interval=${TYPING_INTERVAL_MS}ms, max=${TYPING_MAX_MS}ms, fallback=${THINKING_FALLBACK_ENABLED ? 'on' : 'off'}`)
 })
 
@@ -271,6 +416,8 @@ client.on('messageCreate', (message) => {
   persistInboundDiscordMessage(message)
   // Start typing immediately so users see Claude is working.
   startTypingIndicator(message.channelId)
+  // If Claude is currently blocked on another tool, notify user message is queued.
+  maybeNotifyBusyQueued(message)
 })
 
 client.on('error', (err) => {
@@ -279,6 +426,15 @@ client.on('error', (err) => {
 
 const app = express()
 app.use(express.json({ limit: '1mb' }))
+
+// Handle malformed JSON bodies cleanly (instead of noisy stack traces)
+app.use((err, _req, res, next) => {
+  if (err?.type === 'entity.parse.failed' || (err instanceof SyntaxError && err?.status === 400 && 'body' in err)) {
+    res.status(400).json({ success: false, error: 'Invalid JSON body' })
+    return
+  }
+  next(err)
+})
 
 app.get('/health', (_req, res) => {
   res.json({
@@ -365,6 +521,7 @@ function shutdown(signal) {
   try { server.close() } catch { /* ignore */ }
   try { client.destroy() } catch { /* ignore */ }
   try { db.close() } catch { /* ignore */ }
+  void memoryStore.close().catch(() => {})
   process.exit(0)
 }
 

@@ -18,6 +18,7 @@ Quick-and-dirty **Discord ↔ Claude Code** relay using the same hook concept as
 - Provides tools:
   - `send-discord "message"`
   - `wait-for-discord-messages --deliver`
+- Adds Bash safety guardrails (blocks `run_in_background` and standalone `&` by default)
 - Shows a Discord typing indicator while Claude is working on a reply
 
 ## 1) Create Discord app + bot
@@ -68,10 +69,19 @@ Relay-side (`.env.relay`):
 - `TYPING_MAX_MS` (default: `120000`)
 - `THINKING_FALLBACK_ENABLED` (default: `true`)
 - `THINKING_FALLBACK_TEXT` (default: `Still working on that—thanks for your patience.`)
+- `BUSY_NOTIFY_ON_QUEUE` (default: `true`)
+- `BUSY_NOTIFY_COOLDOWN_MS` (default: `30000`)
 
 Worker-side (`.env.worker`):
 - `RELAY_HOST` / `RELAY_PORT` (or `RELAY_URL`)
 - `AUTO_REPLY_PERMISSION_MODE` (`skip` default, or `accept-edits`)
+- `CLAUDE_RUNTIME_ID` (optional runtime hint; auto-generated at start if omitted)
+- `WAIT_QUIET_TIMEOUT` (`true` default; timeout exits quietly)
+- `BASH_POLICY_MODE` (`block` default, or `allow` with notifications)
+- `ALLOW_BASH_RUN_IN_BACKGROUND` (`false` default)
+- `ALLOW_BASH_BACKGROUND_OPS` (`false` default)
+- `BASH_POLICY_NOTIFY_ON_BLOCK` (`true` default)
+- `BASH_POLICY_NOTIFY_CHANNEL_ID` (optional)
 
 `npm start` loads `.env.relay` and `npm run start:autoreply` loads `.env.worker`.
 Legacy single-file `.env` is still supported as fallback.
@@ -85,6 +95,7 @@ Security note: `start:autoreply` intentionally loads only worker-safe env vars a
 - Keep `RELAY_HOST=127.0.0.1` unless you intentionally expose relay externally.
 - Restrict channels with `DISCORD_ALLOWED_CHANNEL_IDS`.
 - Optionally restrict users with `ALLOWED_DISCORD_USER_IDS`.
+- Bash safety guard blocks risky background patterns by default and sends Discord notifications when triggered.
 
 ## 3) Install + start relay
 
@@ -160,9 +171,12 @@ What this does:
 - adds an auto-reply system prompt (`prompts/autoreply-system.md`)
 - starts an infinite loop:
   1. `wait-for-discord-messages --deliver --timeout 600`
-  2. read inbound message text
+  2. if output contains new messages, read and respond
   3. `send-discord "...reply..."`
   4. repeat
+
+The wait command now enforces a singleton PID lock per agent/session to prevent stacked pollers.
+Timeouts are quiet by default and return exit code 0 (to reduce noisy background failure spam).
 
 Run relay (`npm start`) and auto-reply Claude in separate terminals.
 
@@ -173,23 +187,45 @@ Run relay (`npm start`) and auto-reply Claude in separate terminals.
 - Heartbeat stops when Claude sends a reply through `send-discord`.
 - Safety timeout auto-stops typing after `TYPING_MAX_MS` (default 120s).
 - When typing times out, relay can post a fallback status message (`THINKING_FALLBACK_TEXT`) if `THINKING_FALLBACK_ENABLED=true`.
+- If Claude is currently busy on a different tool, relay can send a queued notice:
+  - "Currently busy with X, queued your message..." (configurable via `BUSY_NOTIFY_*`).
 
-If you change typing env vars, restart the relay process.
+If you change typing/busy-notify env vars, restart the relay process.
 
 ## Message format in Claude context
 
-Hook injects:
+Hook injects inbox messages and (when available) selected memory context:
 
 ```text
 NEW DISCORD MESSAGE(S): [MESSAGE from discord:123...] [DISCORD_MESSAGE]: username: hello
+
+MEMORY CONTEXT:
+Session summary:
+...
+Relevant long-term memory (outside current window):
+...
 ```
+
+Memory retrieval is runtime-aware: it avoids re-injecting turns from the current Claude runtime context, while prioritizing relevant older memory (and compacted summaries) outside that context. `SessionStart` events (including `/new`) rotate runtime context for recall filtering.
 
 ## Notes / limitations (prototype)
 
 - Single-session default (`DISCORD_SESSION_ID=default`)
 - Polling-based wait tool (no FIFO wake optimization yet)
-- Minimal auth (token optional but recommended)
+- Relay API token auth is enabled by default (`RELAY_ALLOW_NO_AUTH=false`)
 - No thread mapping yet
+
+## Memory module (v1 foundation)
+
+A pluggable memory foundation now exists under `memory/` with SQLite as primary store.
+
+Run a quick validation:
+
+```bash
+npm run memory:smoke
+```
+
+This verifies schema init, idempotent batch writes, snapshots, turns, and cards.
 
 ## Next polish steps
 

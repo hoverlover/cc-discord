@@ -1,8 +1,31 @@
 {
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__ORCHESTRATOR_DIR__/hooks/safe-bash.js"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__ORCHESTRATOR_DIR__/hooks/track-activity.js"
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "hooks": [
+          {
+            "type": "command",
+            "command": "__ORCHESTRATOR_DIR__/hooks/track-activity.js"
+          },
           {
             "type": "command",
             "command": "__ORCHESTRATOR_DIR__/hooks/check-discord-messages.js"
@@ -13,6 +36,10 @@
     "PostToolUse": [
       {
         "hooks": [
+          {
+            "type": "command",
+            "command": "__ORCHESTRATOR_DIR__/hooks/track-activity.js"
+          },
           {
             "type": "command",
             "command": "__ORCHESTRATOR_DIR__/hooks/check-discord-messages.js"
@@ -33,6 +60,10 @@
     "Stop": [
       {
         "hooks": [
+          {
+            "type": "command",
+            "command": "__ORCHESTRATOR_DIR__/hooks/track-activity.js"
+          },
           {
             "type": "command",
             "command": "__ORCHESTRATOR_DIR__/hooks/check-discord-messages.js"
