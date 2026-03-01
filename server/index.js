@@ -239,14 +239,15 @@ function isAllowedUser(userId) {
   return ALLOWED_DISCORD_USER_IDS.includes(userId)
 }
 
-function getCurrentAgentActivity() {
+function getCurrentAgentActivity(agentIdOverride) {
+  const targetAgent = agentIdOverride || CLAUDE_AGENT_ID
   try {
     return db.prepare(`
       SELECT status, activity_type, activity_summary, started_at, updated_at
       FROM agent_activity
       WHERE session_id = ? AND agent_id = ?
       LIMIT 1
-    `).get(DISCORD_SESSION_ID, CLAUDE_AGENT_ID)
+    `).get(DISCORD_SESSION_ID, targetAgent)
   } catch {
     return null
   }
@@ -263,12 +264,22 @@ function truncateText(value, maxLen = 140) {
   return `${text.slice(0, maxLen - 1)}…`
 }
 
+function isSleepActivity(row) {
+  const text = `${row?.activity_type || ''} ${row?.activity_summary || ''}`.toLowerCase()
+  return /\bsleep\b/.test(text)
+}
+
 function maybeNotifyBusyQueued(message) {
   if (!BUSY_NOTIFY_ON_QUEUE) return
 
-  const activity = getCurrentAgentActivity()
+  // In channel routing mode, check the channel's subagent activity, not the orchestrator
+  const channelAgentId = MESSAGE_ROUTING_MODE === 'channel' ? message.channelId : null
+  const activity = channelAgentId
+    ? getCurrentAgentActivity(channelAgentId)
+    : getCurrentAgentActivity()
   if (!activity || activity.status !== 'busy') return
   if (isWaitActivity(activity)) return
+  if (isSleepActivity(activity)) return
 
   const activityKey = `${message.channelId}:${activity.started_at || activity.updated_at || activity.activity_summary || activity.activity_type || 'busy'}`
   const now = Date.now()
