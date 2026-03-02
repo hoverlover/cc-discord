@@ -83,7 +83,22 @@ export const MAX_ATTACHMENT_INLINE_BYTES = Number(process.env.MAX_ATTACHMENT_INL
 export const MAX_ATTACHMENT_DOWNLOAD_BYTES = Number(process.env.MAX_ATTACHMENT_DOWNLOAD_BYTES || 10_000_000);
 export const ATTACHMENT_TTL_MS = Number(process.env.ATTACHMENT_TTL_MS || 3_600_000);
 
+export const CATCHUP_MESSAGE_LIMIT = Number(process.env.CATCHUP_MESSAGE_LIMIT ?? 100);
+
 export const ATTACHMENT_DIR = join("/tmp", "cc-discord", "attachments");
+
+export function isAllowedChannel(channelId: string): boolean {
+  if (!channelId) return false;
+  if (IGNORED_CHANNEL_IDS.has(channelId)) return false;
+  if (ALLOWED_CHANNEL_IDS.length > 0) return ALLOWED_CHANNEL_IDS.includes(channelId);
+  return true;
+}
+
+export function isAllowedUser(userId: string | undefined): boolean {
+  if (!userId) return false;
+  if (ALLOWED_DISCORD_USER_IDS.length === 0) return true;
+  return ALLOWED_DISCORD_USER_IDS.includes(userId);
+}
 
 function loadDotEnv(path: string) {
   if (!existsSync(path)) return;

@@ -26,7 +26,7 @@ export async function formatInboundMessage(message: any) {
   return `${author}: ${fullText}`;
 }
 
-export async function persistInboundDiscordMessage(message: any) {
+export async function persistInboundDiscordMessage(message: any): Promise<boolean> {
   const normalizedContent = await formatInboundMessage(message);
   // In channel mode, route to channelId so per-channel subagents consume independently.
   // In agent mode (legacy), route to CLAUDE_AGENT_ID for single-agent consumption.
@@ -57,13 +57,15 @@ export async function persistInboundDiscordMessage(message: any) {
     });
 
     console.log(`[Relay] queued Discord message ${message.id} -> ${targetAgent}`);
+    return true;
   } catch (err: unknown) {
     const msg = String((err as any)?.message || "");
     if (msg.includes("UNIQUE constraint failed")) {
       // Discord can re-deliver in edge cases; idempotent ignore
-      return;
+      return false;
     }
     console.error("[Relay] failed to persist inbound message:", (err as Error).message);
+    return false;
   }
 }
 

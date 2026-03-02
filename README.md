@@ -119,6 +119,7 @@ Project-local env files take precedence over `~/.config/cc-discord/`, so cloned-
 | `MAX_ATTACHMENT_INLINE_BYTES` | `100000` | Max bytes for inline attachment content |
 | `MAX_ATTACHMENT_DOWNLOAD_BYTES` | `10000000` | Max bytes for downloaded attachments |
 | `ATTACHMENT_TTL_MS` | `3600000` | TTL for downloaded attachment files (ms) |
+| `CATCHUP_MESSAGE_LIMIT` | `100` | Messages to fetch per channel on startup for catch-up (`0` to disable) |
 
 ### `.env.worker` — required
 
@@ -267,14 +268,14 @@ To keep cc-discord running across reboots and terminal closures, install it as a
 
 ### macOS (launchd)
 
-1. Find the full path to `bunx`:
+1. Find the full paths to `bunx` and `claude`:
 
 ```bash
-which bunx
-# e.g. /Users/you/.bun/bin/bunx
+which bunx    # e.g. /Users/you/.bun/bin/bunx
+which claude  # e.g. /Users/you/.local/bin/claude
 ```
 
-2. Create the plist file:
+2. Create the plist file (replace all `/Users/you/...` paths with your actual paths from step 1):
 
 ```bash
 cat > ~/Library/LaunchAgents/com.cc-discord.plist << 'EOF'
@@ -295,8 +296,9 @@ cat > ~/Library/LaunchAgents/com.cc-discord.plist << 'EOF'
 
   <key>EnvironmentVariables</key>
   <dict>
+    <!-- Must include directories for both bunx and claude -->
     <key>PATH</key>
-    <string>/Users/you/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <string>/Users/you/.bun/bin:/Users/you/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
   </dict>
 
   <key>RunAtLoad</key>
@@ -315,7 +317,7 @@ cat > ~/Library/LaunchAgents/com.cc-discord.plist << 'EOF'
 EOF
 ```
 
-3. Replace `/Users/you/.bun/bin/bunx` and the `PATH` value with your actual paths.
+3. **Important:** launchd does not source your shell profile, so the `PATH` must explicitly include the directories for both `bunx` and `claude`. Verify the paths match your system.
 
 4. Load the service:
 

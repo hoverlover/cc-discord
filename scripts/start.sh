@@ -149,7 +149,7 @@ RELAY_PORT="${RELAY_PORT:-3199}"
 RELAY_API_TOKEN="${RELAY_API_TOKEN:-}"
 
 # Ensure bun/curl/claude are findable
-export PATH="$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH="$HOME/.bun/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 # ---- Pre-flight: Claude auth check ----
 if ! claude auth status >/dev/null 2>&1; then

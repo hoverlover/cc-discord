@@ -4,6 +4,7 @@ import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } from "di
 import express, { type NextFunction, type Request, type Response } from "express";
 import { cleanupOldAttachments } from "./attachment.ts";
 import { maybeNotifyBusyQueued } from "./busy-notify.ts";
+import { catchUpMissedMessages } from "./catchup.ts";
 import {
   ALLOWED_CHANNEL_IDS,
   ALLOWED_DISCORD_USER_IDS,
@@ -13,6 +14,8 @@ import {
   DISCORD_BOT_TOKEN,
   DISCORD_SESSION_ID,
   IGNORED_CHANNEL_IDS,
+  isAllowedChannel,
+  isAllowedUser,
   MESSAGE_ROUTING_MODE,
   RELAY_ALLOW_NO_AUTH,
   RELAY_API_TOKEN,
@@ -38,19 +41,6 @@ cleanupOldAttachments();
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
 });
-
-function isAllowedChannel(channelId: string): boolean {
-  if (!channelId) return false;
-  if (IGNORED_CHANNEL_IDS.has(channelId)) return false;
-  if (ALLOWED_CHANNEL_IDS.length > 0) return ALLOWED_CHANNEL_IDS.includes(channelId);
-  return true;
-}
-
-function isAllowedUser(userId: string | undefined): boolean {
-  if (!userId) return false;
-  if (ALLOWED_DISCORD_USER_IDS.length === 0) return true;
-  return ALLOWED_DISCORD_USER_IDS.includes(userId);
-}
 
 function requireAuth(req: Request, res: Response): boolean {
   if (RELAY_ALLOW_NO_AUTH) return true;
@@ -104,6 +94,11 @@ client.once("clientReady", async () => {
 
   // Start live trace thread flush loop
   startTraceFlushLoop(client);
+
+  // Catch up messages missed while offline
+  catchUpMissedMessages(client).catch((err) => {
+    console.error("[Relay] Catch-up failed:", (err as Error).message);
+  });
 });
 
 client.on("messageCreate", async (message) => {
