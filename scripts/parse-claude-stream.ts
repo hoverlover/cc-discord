@@ -23,8 +23,63 @@
  *   SHOW_THINKING=1            (show extended-thinking blocks, default: 0)
  */
 
+import { Database as DatabaseSync } from "bun:sqlite";
+import { join } from "node:path";
+
 const LOG_LEVEL = (process.env.LOG_LEVEL ?? "info").toLowerCase();
 const SHOW_THINKING = process.env.SHOW_THINKING === "1";
+
+// ---- Trace thread integration ----
+// Write reasoning/thinking blocks to the trace_events DB table so
+// the relay server can post them to the channel's live Agent Trace thread.
+
+const TRACE_ENABLED = String(process.env.TRACE_THREAD_ENABLED || "true").toLowerCase() !== "false";
+const TRACE_SESSION_ID = process.env.DISCORD_SESSION_ID || process.env.SESSION_ID || "default";
+const TRACE_AGENT_ID = process.env.AGENT_ID || process.env.CLAUDE_AGENT_ID || "claude";
+const TRACE_CHANNEL_ID = TRACE_AGENT_ID; // In channel routing mode, agent_id IS the channel ID
+const ORCHESTRATOR_DIR = process.env.ORCHESTRATOR_DIR || "";
+
+let traceDb: InstanceType<typeof DatabaseSync> | null = null;
+
+function getTraceDb(): InstanceType<typeof DatabaseSync> | null {
+  if (!TRACE_ENABLED || !ORCHESTRATOR_DIR) return null;
+  if (traceDb) return traceDb;
+  try {
+    const dbPath = join(ORCHESTRATOR_DIR, "data", "messages.db");
+    traceDb = new DatabaseSync(dbPath);
+    traceDb.exec(`
+      CREATE TABLE IF NOT EXISTS trace_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        session_id TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        channel_id TEXT,
+        event_type TEXT NOT NULL,
+        tool_name TEXT,
+        summary TEXT,
+        posted INTEGER DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_trace_events_pending
+        ON trace_events(posted, created_at);
+    `);
+    return traceDb;
+  } catch {
+    return null;
+  }
+}
+
+function writeTraceEvent(eventType: string, toolName: string | null, summary: string) {
+  try {
+    const db = getTraceDb();
+    if (!db) return;
+    db.prepare(`
+      INSERT INTO trace_events (session_id, agent_id, channel_id, event_type, tool_name, summary)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(TRACE_SESSION_ID, TRACE_AGENT_ID, TRACE_CHANNEL_ID, eventType, toolName, summary);
+  } catch {
+    // fail-open — never break the parser for trace
+  }
+}
 
 // ---- Helpers ----
 
@@ -125,6 +180,8 @@ function handleEvent(evt: any) {
           } else {
             debug("thinking", trunc(block.thinking, 300));
           }
+          // Write full reasoning to trace thread (no truncation)
+          writeTraceEvent("thinking", null, block.thinking);
         }
       }
     }
@@ -281,6 +338,9 @@ async function main() {
   }
 
   log("parser", "Stream ended");
+
+  // Clean up trace DB connection
+  try { traceDb?.close(); } catch { /* ignore */ }
 }
 
 main().catch((err) => {

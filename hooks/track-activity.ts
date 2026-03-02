@@ -113,6 +113,23 @@ try {
   }
 
   if (hookEvent === "PostToolUse" || hookEvent === "Stop" || hookEvent === "SessionStart") {
+    // Read started_at BEFORE clearing it (needed for elapsed time calculation)
+    let elapsedTag = "";
+    if (traceEnabled && hookEvent === "PostToolUse") {
+      try {
+        const row = db.prepare(`
+          SELECT started_at FROM agent_activity
+          WHERE session_id = ? AND agent_id = ?
+        `).get(sessionId, agentId) as { started_at?: string } | undefined;
+        if (row?.started_at) {
+          const elapsedMs = Date.now() - new Date(row.started_at).getTime();
+          if (elapsedMs >= 0 && elapsedMs < 600_000) {
+            elapsedTag = `elapsed:${elapsedMs}|`;
+          }
+        }
+      } catch { /* best-effort */ }
+    }
+
     db.prepare(`
       INSERT INTO agent_activity (
         session_id,
@@ -131,14 +148,14 @@ try {
         updated_at = excluded.updated_at
     `).run(sessionId, agentId, now);
 
-    // Write trace event for the live trace thread
+    // Write trace event for the live trace thread (with elapsed time)
     if (traceEnabled && hookEvent === "PostToolUse") {
       try {
         const summary = summarizeTool(toolName, toolInput);
         db.prepare(`
           INSERT INTO trace_events (session_id, agent_id, channel_id, event_type, tool_name, summary)
           VALUES (?, ?, ?, 'tool_end', ?, ?)
-        `).run(sessionId, agentId, traceChannelId, toolName || "tool", summary);
+        `).run(sessionId, agentId, traceChannelId, toolName || "tool", `${elapsedTag}${summary}`);
       } catch { /* fail-open */ }
     }
   }
@@ -175,7 +192,7 @@ function summarizeTool(toolName: string | null, toolInput: any): string {
       .replace(/\s+/g, " ")
       .trim();
     if (!command) return "Bash";
-    return truncate(command, 180);
+    return command;
   }
 
   if (name === "Read") {
@@ -190,7 +207,7 @@ function summarizeTool(toolName: string | null, toolInput: any): string {
 
   if (name === "Task") {
     const desc = String(toolInput.description || toolInput.prompt || "").trim();
-    return desc ? `Task: ${truncate(desc, 160)}` : "Task";
+    return desc ? `Task: ${desc}` : "Task";
   }
 
   return name;

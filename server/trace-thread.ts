@@ -133,6 +133,7 @@ async function ensureTraceThread(client: Client, channelId: string): Promise<Thr
 const EVENT_ICONS: Record<string, string> = {
   tool_start: "🔧",
   tool_end: "✅",
+  thinking: "🧠",
   status_busy: "⏳",
   status_idle: "💤",
   error: "❌",
@@ -141,9 +142,49 @@ const EVENT_ICONS: Record<string, string> = {
 function formatTraceEvent(event: TraceEvent): string {
   const icon = EVENT_ICONS[event.event_type] || "📌";
   const ts = formatTimestamp(event.created_at);
-  const tool = event.tool_name ? ` \`${event.tool_name}\`` : "";
-  const summary = event.summary ? ` — ${truncate(event.summary, 200)}` : "";
-  return `${icon} \`${ts}\`${tool}${summary}`;
+
+  // Reasoning/thinking events get a distinct format
+  if (event.event_type === "thinking") {
+    const thought = event.summary ? cleanWhitespace(event.summary) : "";
+    return `${icon} \`${ts}\` ${thought}`;
+  }
+
+  const tool = event.tool_name ? `\`${event.tool_name}\`` : "";
+
+  // Tool start: ▶ marker with summary
+  if (event.event_type === "tool_start") {
+    const summary = event.summary ? ` — ${cleanWhitespace(event.summary)}` : "";
+    return `${icon} \`${ts}\` ▶ ${tool}${summary}`;
+  }
+
+  // Tool end: ✓ marker with elapsed time, no summary duplication
+  if (event.event_type === "tool_end") {
+    const elapsed = parseElapsed(event.summary);
+    const elapsedStr = elapsed !== null ? ` in ${formatElapsed(elapsed)}` : "";
+    return `${icon} \`${ts}\` ✓ ${tool} done${elapsedStr}`;
+  }
+
+  // Default format for other event types
+  const summary = event.summary ? ` — ${cleanWhitespace(event.summary)}` : "";
+  return `${icon} \`${ts}\` ${tool}${summary}`;
+}
+
+/** Parse "elapsed:1234|..." prefix from tool_end summary. Returns ms or null. */
+function parseElapsed(summary: string | null | undefined): number | null {
+  if (!summary) return null;
+  const match = summary.match(/^elapsed:(\d+)\|/);
+  if (!match) return null;
+  return parseInt(match[1], 10);
+}
+
+/** Format milliseconds into a human-friendly duration string */
+function formatElapsed(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const secs = ms / 1000;
+  if (secs < 60) return `${secs.toFixed(1)}s`;
+  const mins = Math.floor(secs / 60);
+  const remSecs = Math.round(secs % 60);
+  return `${mins}m ${remSecs}s`;
 }
 
 function formatTimestamp(iso: string): string {
@@ -155,10 +196,12 @@ function formatTimestamp(iso: string): string {
   }
 }
 
-function truncate(text: string, maxLen: number): string {
-  const s = String(text || "").replace(/\s+/g, " ").trim();
-  if (s.length <= maxLen) return s;
-  return `${s.slice(0, maxLen - 1)}…`;
+/** Clean up text for display — convert literal \n to real newlines, preserve full content. */
+function cleanWhitespace(text: string): string {
+  return String(text || "")
+    .replace(/\\n/g, "\n")   // convert literal \n to real newlines
+    .replace(/[ \t]+/g, " ") // collapse horizontal whitespace (but keep newlines)
+    .trim();
 }
 
 // ── Flush loop ──────────────────────────────────────────────────────
@@ -231,7 +274,8 @@ async function flushTraceEvents(client: Client) {
   markTraceEventsPosted(postedIds);
 }
 
-/** Split lines into batches that fit within maxLen characters */
+/** Split lines into batches that fit within maxLen characters.
+ *  Long lines are split across multiple batches instead of truncated. */
 function batchLines(lines: string[], maxLen: number): string[] {
   const batches: string[] = [];
   let current = "";
@@ -240,7 +284,17 @@ function batchLines(lines: string[], maxLen: number): string[] {
     const next = current ? `${current}\n${line}` : line;
     if (next.length > maxLen) {
       if (current) batches.push(current);
-      current = line.length > maxLen ? line.slice(0, maxLen) : line;
+      // If a single line exceeds maxLen, split it into chunks
+      if (line.length > maxLen) {
+        let remaining = line;
+        while (remaining.length > maxLen) {
+          batches.push(remaining.slice(0, maxLen));
+          remaining = remaining.slice(maxLen);
+        }
+        current = remaining;
+      } else {
+        current = line;
+      }
     } else {
       current = next;
     }

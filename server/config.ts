@@ -66,7 +66,7 @@ export const BUSY_NOTIFY_MIN_DURATION_MS = Number(process.env.BUSY_NOTIFY_MIN_DU
 // ── Live Trace Thread ───────────────────────────────────────────────
 export const TRACE_THREAD_ENABLED =
   String(process.env.TRACE_THREAD_ENABLED || "true").toLowerCase() !== "false";
-export const TRACE_THREAD_NAME = process.env.TRACE_THREAD_NAME || "⚙️ Live Trace";
+export const TRACE_THREAD_NAME = process.env.TRACE_THREAD_NAME || "🔍 Agent Trace";
 export const TRACE_FLUSH_INTERVAL_MS = Number(process.env.TRACE_FLUSH_INTERVAL_MS || 3000);
 
 export const MAX_ATTACHMENT_INLINE_BYTES = Number(process.env.MAX_ATTACHMENT_INLINE_BYTES || 100_000);
