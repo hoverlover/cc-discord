@@ -6,6 +6,18 @@
   "bin": {
     "cc-discord": "./scripts/start.sh"
   },
+  "files": [
+    "scripts/",
+    "server/",
+    "hooks/",
+    "tools/",
+    "prompts/",
+    "memory/",
+    ".claude/settings.template.json",
+    ".env.example",
+    ".env.relay.example",
+    ".env.worker.example"
+  ],
   "scripts": {
     "start": "bash scripts/start.sh",
     "start:relay": "bash scripts/start-relay.sh",
