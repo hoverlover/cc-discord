@@ -21,7 +21,15 @@
 bunx @hoverlover/cc-discord
 ```
 
-This installs and runs cc-discord in one step. Configure your `.env.relay` and `.env.worker` files in the current directory before running.
+This installs and runs cc-discord in one step. On first run, config files are created at `~/.config/cc-discord/`:
+
+```
+~/.config/cc-discord/
+├── .env.relay    # Discord bot token, channel ID, relay token
+└── .env.worker   # Relay API token, worker settings
+```
+
+Edit those files with your credentials, then run again. Override the config location with `CC_DISCORD_CONFIG_DIR`.
 
 ### Option B: Clone the repo (contributors)
 
@@ -69,10 +77,16 @@ If you don't already have a Discord server to use:
 
 ## Configure environment
 
+**bunx users:** env files are auto-created at `~/.config/cc-discord/` on first run. Just edit them there.
+
+**Cloned-repo users:** copy the example files into the project root:
+
 ```bash
 cp .env.relay.example .env.relay
 cp .env.worker.example .env.worker
 ```
+
+Project-local env files take precedence over `~/.config/cc-discord/`, so cloned-repo users are unaffected by the config directory.
 
 ### `.env.relay` — required
 
@@ -140,6 +154,7 @@ These are read by the orchestrator shell script:
 |---|---|---|
 | `HEALTH_CHECK_INTERVAL` | `30` | Seconds between health checks |
 | `AGENT_RESTART_DELAY` | `5` | Seconds to wait before restarting a dead agent |
+| `CC_DISCORD_CONFIG_DIR` | `~/.config/cc-discord` | Directory for user config env files |
 | `CC_DISCORD_LOG_DIR` | `/tmp/cc-discord/logs` | Directory for all log files |
 
 Security note: the worker process intentionally does not receive `DISCORD_BOT_TOKEN`.

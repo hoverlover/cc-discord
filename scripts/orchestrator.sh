@@ -22,7 +22,9 @@ source "$ROOT_DIR/scripts/load-env.sh"
 
 # Load relay connection env vars
 load_env_file "$ROOT_DIR/.env.worker"
+load_env_file "${CC_DISCORD_CONFIG_DIR:-$HOME/.config/cc-discord}/.env.worker"
 load_env_file "$ROOT_DIR/.env"
+load_env_file "${CC_DISCORD_CONFIG_DIR:-$HOME/.config/cc-discord}/.env"
 
 # Ensure bun/curl are findable
 export PATH="$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"

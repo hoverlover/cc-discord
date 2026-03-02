@@ -24,6 +24,44 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# User config directory (~/.config/cc-discord by default, override with CC_DISCORD_CONFIG_DIR)
+export CC_DISCORD_CONFIG_DIR="${CC_DISCORD_CONFIG_DIR:-$HOME/.config/cc-discord}"
+if [ ! -d "$CC_DISCORD_CONFIG_DIR" ]; then
+  mkdir -p "$CC_DISCORD_CONFIG_DIR"
+  log_setup=true
+else
+  log_setup=false
+fi
+
+# Seed example env files into config dir if they don't exist.
+# If the user's config already exists but the example is newer, print a hint.
+_is_newer() {
+  # Return 0 if $1 is newer than $2. Works on both macOS and Linux.
+  if stat -f %m "$1" >/dev/null 2>&1; then
+    [ "$(stat -f %m "$1")" -gt "$(stat -f %m "$2")" ]
+  else
+    [ "$(stat -c %Y "$1")" -gt "$(stat -c %Y "$2")" ]
+  fi
+}
+_seed_config() {
+  local src="$1" dest="$2"
+  [ -f "$src" ] || return 0
+  if [ ! -f "$dest" ]; then
+    cp "$src" "$dest"
+    echo "[start] Seeded $dest — edit this file to configure cc-discord."
+  elif _is_newer "$src" "$dest"; then
+    echo "[start] NOTE: $(basename "$src") has new options. Compare with your config:"
+    echo "[start]   diff $dest $src"
+  fi
+}
+_seed_config "$ROOT_DIR/.env.relay.example" "$CC_DISCORD_CONFIG_DIR/.env.relay"
+_seed_config "$ROOT_DIR/.env.worker.example" "$CC_DISCORD_CONFIG_DIR/.env.worker"
+
+if $log_setup; then
+  echo "[start] Created config directory: $CC_DISCORD_CONFIG_DIR"
+  echo "[start] Edit .env.relay and .env.worker in that directory, then restart."
+fi
+
 # Log directory (shared with orchestrator and channel agents)
 export CC_DISCORD_LOG_DIR="${CC_DISCORD_LOG_DIR:-/tmp/cc-discord/logs}"
 mkdir -p "$CC_DISCORD_LOG_DIR"
@@ -68,7 +106,9 @@ MAX_WAIT=30
 WAITED=0
 source "$ROOT_DIR/scripts/load-env.sh"
 load_env_file "$ROOT_DIR/.env.worker"
+load_env_file "$CC_DISCORD_CONFIG_DIR/.env.worker"
 load_env_file "$ROOT_DIR/.env"
+load_env_file "$CC_DISCORD_CONFIG_DIR/.env"
 RELAY_HOST="${RELAY_HOST:-127.0.0.1}"
 RELAY_PORT="${RELAY_PORT:-3199}"
 RELAY_API_TOKEN="${RELAY_API_TOKEN:-}"

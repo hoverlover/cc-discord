@@ -23,8 +23,10 @@ WORKER_KEYS=(
 
 # Preferred split env file for worker process
 load_env_keys "$ROOT_DIR/.env.worker" "${WORKER_KEYS[@]}"
+load_env_keys "${CC_DISCORD_CONFIG_DIR:-$HOME/.config/cc-discord}/.env.worker" "${WORKER_KEYS[@]}"
 # Legacy fallback (single-file mode)
 load_env_keys "$ROOT_DIR/.env" "${WORKER_KEYS[@]}"
+load_env_keys "${CC_DISCORD_CONFIG_DIR:-$HOME/.config/cc-discord}/.env" "${WORKER_KEYS[@]}"
 
 SETTINGS_PATH="$ROOT_DIR/.claude/settings.json"
 SYSTEM_PROMPT_PATH="$ROOT_DIR/prompts/orchestrator-system.md"

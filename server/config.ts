@@ -10,9 +10,17 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 export const ROOT_DIR = join(__dirname, "..");
 export const DATA_DIR = join(ROOT_DIR, "data");
 
+// User config directory (~/.config/cc-discord by default, override with CC_DISCORD_CONFIG_DIR)
+const CONFIG_DIR =
+  process.env.CC_DISCORD_CONFIG_DIR ||
+  join(process.env.HOME || "", ".config", "cc-discord");
+
 // Preferred split env file for relay process; legacy fallback for compatibility.
+// Precedence: ROOT_DIR > CONFIG_DIR (loadDotEnv skips keys already set)
 loadDotEnv(join(ROOT_DIR, ".env.relay"));
+loadDotEnv(join(CONFIG_DIR, ".env.relay"));
 loadDotEnv(join(ROOT_DIR, ".env"));
+loadDotEnv(join(CONFIG_DIR, ".env"));
 
 export const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 export const DEFAULT_CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;

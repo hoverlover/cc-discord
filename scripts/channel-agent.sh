@@ -34,7 +34,9 @@ WORKER_KEYS=(
   BASH_POLICY_NOTIFY_CHANNEL_ID
 )
 load_env_keys "$ROOT_DIR/.env.worker" "${WORKER_KEYS[@]}"
+load_env_keys "${CC_DISCORD_CONFIG_DIR:-$HOME/.config/cc-discord}/.env.worker" "${WORKER_KEYS[@]}"
 load_env_keys "$ROOT_DIR/.env" "${WORKER_KEYS[@]}"
+load_env_keys "${CC_DISCORD_CONFIG_DIR:-$HOME/.config/cc-discord}/.env" "${WORKER_KEYS[@]}"
 
 # Ensure bun is on PATH for hooks/tools
 export PATH="$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$ROOT_DIR/tools:$PATH"
