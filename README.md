@@ -271,6 +271,8 @@ In interactive mode, the orchestrator runs as a Claude Code session with a visib
 
 To keep cc-discord running across reboots and terminal closures, install it as a system service.
 
+> **Dedicated Mac server?** If you're setting up a Mac mini (or similar) as a headless, always-on server, see the [macOS Headless Server Setup Guide](docs/mac-setup-guide.md). It covers disabling SIP, configuring TCC permissions, FileVault tradeoffs, auto-login, and LaunchDaemon setup for fully unattended operation.
+
 ### macOS (launchd)
 
 1. Find the full paths to `bunx` and `claude`:
