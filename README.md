@@ -37,7 +37,6 @@ Edit those files with your credentials, then run again. Override the config loca
 git clone https://github.com/hoverlover/cc-discord.git
 cd cc-discord
 bun install
-bun run generate-settings
 bun start
 ```
 
@@ -426,10 +425,8 @@ sudo systemctl disable cc-discord
 | `bun run start:orchestrator` | Start headless orchestrator only |
 | `bun run start:orchestrator-interactive` | Start interactive orchestrator (terminal UI) |
 | `bun run dev` | Alias for `start:relay` |
-| `bun run generate-settings` | Generate `.claude/settings.json` with absolute hook paths |
 | `bun run memory:smoke` | Run memory system smoke test |
 | `bun run memory:inspect` | Inspect memory database contents |
-| `bun run memory:migrate` | Migrate memory to channel-scoped keys |
 | `bun run lint` | Run Biome linter |
 | `bun run lint:fix` | Run Biome linter with auto-fix |
 | `bun run format` | Format code with Biome |
@@ -437,7 +434,7 @@ sudo systemctl disable cc-discord
 
 ### Hook system
 
-Claude Code hooks are configured in `.claude/settings.json` (generated from `.claude/settings.template.json` by `bun run generate-settings`). The template uses `__ORCHESTRATOR_DIR__` placeholders that are replaced with absolute paths at generation time.
+Claude Code hooks are configured in `.claude/settings.local.json`, generated automatically from `.claude/settings.template.json` when the relay starts. This file is gitignored and only exists while the relay is running — `start.sh` creates it on startup and removes it on shutdown so hooks don't interfere with normal development. The template uses `__ORCHESTRATOR_DIR__` placeholders that are replaced with absolute paths at generation time.
 
 | Hook | Event | Description |
 |---|---|---|

@@ -34,7 +34,7 @@ load_env_keys "${CC_DISCORD_CONFIG_DIR:-$HOME/.config/cc-discord}/.env.worker" "
 load_env_keys "$ROOT_DIR/.env" "${WORKER_KEYS[@]}"
 load_env_keys "${CC_DISCORD_CONFIG_DIR:-$HOME/.config/cc-discord}/.env" "${WORKER_KEYS[@]}"
 
-SETTINGS_PATH="$ROOT_DIR/.claude/settings.json"
+SETTINGS_PATH="$ROOT_DIR/.claude/settings.local.json"
 SYSTEM_PROMPT_PATH="$ROOT_DIR/prompts/orchestrator-system.md"
 
 if ! command -v claude >/dev/null 2>&1; then

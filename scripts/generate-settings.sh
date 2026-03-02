@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "$_SCRIPT")" && pwd)"
 ORCHESTRATOR_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 TEMPLATE="$ORCHESTRATOR_DIR/.claude/settings.template.json"
-OUTPUT="$ORCHESTRATOR_DIR/.claude/settings.json"
+OUTPUT="$ORCHESTRATOR_DIR/.claude/settings.local.json"
 
 if [ ! -f "$TEMPLATE" ]; then
   echo "Template not found: $TEMPLATE"

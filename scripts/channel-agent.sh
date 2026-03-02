@@ -47,7 +47,7 @@ load_env_keys "${CC_DISCORD_CONFIG_DIR:-$HOME/.config/cc-discord}/.env" "${WORKE
 # Ensure bun is on PATH for hooks/tools
 export PATH="$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$ROOT_DIR/tools:$PATH"
 
-SETTINGS_PATH="$ROOT_DIR/.claude/settings.json"
+SETTINGS_PATH="$ROOT_DIR/.claude/settings.local.json"
 PROMPT_TEMPLATE="$ROOT_DIR/prompts/channel-system.md"
 
 if ! command -v claude >/dev/null 2>&1; then

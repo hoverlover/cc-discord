@@ -85,11 +85,11 @@ if [ -d "$ROOT_DIR/.claude/skills" ] && [ "$ROOT_DIR" != "$CC_DISCORD_HOME" ]; t
   done
 fi
 
-# Seed settings.json so Claude sees project config.
-if [ "$ROOT_DIR" != "$CC_DISCORD_HOME" ] && [ -f "$ROOT_DIR/.claude/settings.template.json" ]; then
+# Generate settings.local.json (hooks + relay permissions) so Claude agents see project config.
+if [ -f "$ROOT_DIR/.claude/settings.template.json" ]; then
   bash "$ROOT_DIR/scripts/generate-settings.sh"
-  if [ -f "$ROOT_DIR/.claude/settings.json" ]; then
-    cp "$ROOT_DIR/.claude/settings.json" "$CC_DISCORD_HOME/.claude/settings.json"
+  if [ "$ROOT_DIR" != "$CC_DISCORD_HOME" ] && [ -f "$ROOT_DIR/.claude/settings.local.json" ]; then
+    cp "$ROOT_DIR/.claude/settings.local.json" "$CC_DISCORD_HOME/.claude/settings.local.json"
   fi
 fi
 
@@ -119,6 +119,10 @@ cleanup() {
     kill -TERM "$RELAY_PID" 2>/dev/null || true
     wait "$RELAY_PID" 2>/dev/null || true
   fi
+
+  # Remove generated settings.local.json so hooks don't fire during normal development
+  rm -f "$ROOT_DIR/.claude/settings.local.json"
+  rm -f "$CC_DISCORD_HOME/.claude/settings.local.json"
 
   log "All processes stopped."
   exit 0
