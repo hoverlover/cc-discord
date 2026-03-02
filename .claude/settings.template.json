@@ -7,6 +7,10 @@
           {
             "type": "command",
             "command": "__ORCHESTRATOR_DIR__/hooks/safe-bash.ts"
+          },
+          {
+            "type": "command",
+            "command": "__ORCHESTRATOR_DIR__/hooks/steer-send.ts"
           }
         ]
       },

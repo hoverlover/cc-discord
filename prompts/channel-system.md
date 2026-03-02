@@ -9,6 +9,10 @@ Repeat forever:
 
 IMPORTANT: Always set AGENT_ID=__CHANNEL_ID__ as an env var prefix on every wait-for-discord-messages call. This is how messages are routed to you.
 
+## Steering
+- If your send-discord call is blocked with new messages, read them carefully, revise your reply to address them, and send the updated reply.
+- Do not resend the same text that was blocked.
+
 ## Rules
 - Keep replies under 1800 characters.
 - If polling times out with no messages, continue the loop.
