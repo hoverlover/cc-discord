@@ -262,6 +262,159 @@ In interactive mode, the orchestrator runs as a Claude Code session with a visib
 
 ---
 
+## Running as a daemon
+
+To keep cc-discord running across reboots and terminal closures, install it as a system service.
+
+### macOS (launchd)
+
+1. Find the full path to `bunx`:
+
+```bash
+which bunx
+# e.g. /Users/you/.bun/bin/bunx
+```
+
+2. Create the plist file:
+
+```bash
+cat > ~/Library/LaunchAgents/com.cc-discord.plist << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.cc-discord</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <!-- Replace with the output of: which bunx -->
+    <string>/Users/you/.bun/bin/bunx</string>
+    <string>@hoverlover/cc-discord</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/Users/you/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/cc-discord/launchd-stdout.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/tmp/cc-discord/launchd-stderr.log</string>
+</dict>
+</plist>
+EOF
+```
+
+3. Replace `/Users/you/.bun/bin/bunx` and the `PATH` value with your actual paths.
+
+4. Load the service:
+
+```bash
+mkdir -p /tmp/cc-discord
+launchctl load ~/Library/LaunchAgents/com.cc-discord.plist
+```
+
+5. Manage the service:
+
+```bash
+# Check status
+launchctl list | grep cc-discord
+
+# Stop
+launchctl stop com.cc-discord
+
+# Start
+launchctl start com.cc-discord
+
+# Uninstall
+launchctl unload ~/Library/LaunchAgents/com.cc-discord.plist
+rm ~/Library/LaunchAgents/com.cc-discord.plist
+```
+
+### Linux (systemd)
+
+1. Find the full paths to `bunx` and `claude`:
+
+```bash
+which bunx    # e.g. /home/you/.bun/bin/bunx
+which claude  # e.g. /home/you/.local/bin/claude
+```
+
+2. Create the service file:
+
+```bash
+sudo cat > /etc/systemd/system/cc-discord.service << 'EOF'
+[Unit]
+Description=cc-discord — Discord <-> Claude Code relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Replace "you" with your username
+User=you
+# Replace with the output of: which bunx
+ExecStart=/home/you/.bun/bin/bunx @hoverlover/cc-discord
+# Ensure bun and claude are on PATH
+Environment=PATH=/home/you/.bun/bin:/home/you/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HOME=/home/you
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+3. Replace `you` with your actual username and update the paths to match your system.
+
+4. Enable and start the service:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable cc-discord
+sudo systemctl start cc-discord
+```
+
+5. Manage the service:
+
+```bash
+# Check status
+systemctl status cc-discord
+
+# View logs
+journalctl -u cc-discord -f
+
+# Stop
+sudo systemctl stop cc-discord
+
+# Restart
+sudo systemctl restart cc-discord
+
+# Disable (won't start on boot)
+sudo systemctl disable cc-discord
+```
+
+### Notes
+
+- Both approaches run `bunx @hoverlover/cc-discord`, which is the same as `bun start` in the cloned repo.
+- Environment files are read from `~/.config/cc-discord/` — make sure those are configured before starting the service.
+- Application logs still go to `CC_DISCORD_LOG_DIR` (default `/tmp/cc-discord/logs`). The launchd/systemd logs are separate and capture startup errors.
+- Claude CLI must be authenticated (`claude auth login`) as the user the service runs under before starting.
+
+---
+
 ## Development
 
 ### Scripts
