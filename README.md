@@ -5,6 +5,7 @@
 - One autonomous Claude Code agent per Discord channel
 - Messages stored in SQLite, delivered to agents via hooks
 - Replies sent back to Discord via `send-discord` tool
+- Automatic catch-up of missed messages on startup — no messages lost during restarts
 - Typing indicators, busy notifications, live trace threads, memory context, attachment support, and more
 
 ## Quick start
@@ -197,6 +198,10 @@ Security note: the worker process intentionally does not receive `DISCORD_BOT_TO
 ---
 
 ## Features
+
+### Message catch-up
+
+When the relay starts, it fetches recent message history from each allowed channel and persists any messages that arrived while it was offline. Duplicates are silently ignored. This ensures no messages are lost during restarts or outages. Controlled by `CATCHUP_MESSAGE_LIMIT` (default 100, set to `0` to disable).
 
 ### Typing indicators
 
