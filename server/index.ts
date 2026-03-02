@@ -26,6 +26,7 @@ import {
 import { clearChannelModel, db, getAgentHealthAll, getChannelModel, setChannelModel } from "./db.ts";
 import { memoryStore } from "./memory.ts";
 import { persistInboundDiscordMessage, persistOutboundDiscordMessage } from "./messages.ts";
+import { startTraceFlushLoop, stopTraceFlushLoop } from "./trace-thread.ts";
 import { startTypingIndicator, stopAllTypingSessions, stopTypingIndicator } from "./typing.ts";
 
 validateConfig();
@@ -100,6 +101,9 @@ client.once("clientReady", async () => {
   } catch (err: unknown) {
     console.error("[Relay] Failed to register slash commands:", (err as Error).message);
   }
+
+  // Start live trace thread flush loop
+  startTraceFlushLoop(client);
 });
 
 client.on("messageCreate", async (message) => {
@@ -282,6 +286,7 @@ client.login(DISCORD_BOT_TOKEN).catch((err: Error) => {
 
 function shutdown(signal: string) {
   console.log(`\n[Relay] Received ${signal}. Shutting down...`);
+  stopTraceFlushLoop();
   stopAllTypingSessions(client, persistOutboundDiscordMessage);
   try {
     server.close();

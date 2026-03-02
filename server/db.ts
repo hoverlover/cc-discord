@@ -51,6 +51,27 @@ db.exec(`
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_by TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS trace_threads (
+    channel_id TEXT PRIMARY KEY,
+    thread_id TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS trace_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    session_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    channel_id TEXT,
+    event_type TEXT NOT NULL,
+    tool_name TEXT,
+    summary TEXT,
+    posted INTEGER DEFAULT 0
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_trace_events_pending
+    ON trace_events(posted, created_at);
 `);
 
 export const insertStmt = db.prepare(`
@@ -104,6 +125,76 @@ export function getCurrentAgentActivity(sessionId: string, defaultAgentId: strin
       .get(sessionId, targetAgent);
   } catch {
     return null;
+  }
+}
+
+// ── Trace thread helpers ────────────────────────────────────────────
+
+export function getTraceThreadId(channelId: string): string | null {
+  try {
+    const row = db.prepare("SELECT thread_id FROM trace_threads WHERE channel_id = ?").get(channelId) as any;
+    return row?.thread_id || null;
+  } catch {
+    return null;
+  }
+}
+
+export function setTraceThreadId(channelId: string, threadId: string) {
+  db.prepare(`
+    INSERT INTO trace_threads (channel_id, thread_id, created_at)
+    VALUES (?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(channel_id) DO UPDATE SET
+      thread_id = excluded.thread_id,
+      created_at = excluded.created_at
+  `).run(channelId, threadId);
+}
+
+export interface TraceEvent {
+  id: number;
+  created_at: string;
+  session_id: string;
+  agent_id: string;
+  channel_id: string | null;
+  event_type: string;
+  tool_name: string | null;
+  summary: string | null;
+}
+
+export function getPendingTraceEvents(limit: number = 50): TraceEvent[] {
+  try {
+    return db
+      .prepare("SELECT * FROM trace_events WHERE posted = 0 ORDER BY created_at, id LIMIT ?")
+      .all(limit) as TraceEvent[];
+  } catch {
+    return [];
+  }
+}
+
+export function markTraceEventsPosted(ids: number[]) {
+  if (!ids.length) return;
+  try {
+    const placeholders = ids.map(() => "?").join(",");
+    db.prepare(`UPDATE trace_events SET posted = 1 WHERE id IN (${placeholders})`).run(...ids);
+  } catch {
+    // fail-open
+  }
+}
+
+export function insertTraceEvent(
+  sessionId: string,
+  agentId: string,
+  channelId: string | null,
+  eventType: string,
+  toolName: string | null,
+  summary: string | null,
+) {
+  try {
+    db.prepare(`
+      INSERT INTO trace_events (session_id, agent_id, channel_id, event_type, tool_name, summary)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(sessionId, agentId, channelId, eventType, toolName, summary);
+  } catch {
+    // fail-open
   }
 }
 

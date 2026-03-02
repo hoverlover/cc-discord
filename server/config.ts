@@ -63,6 +63,12 @@ export const BUSY_NOTIFY_COOLDOWN_MS = Number(process.env.BUSY_NOTIFY_COOLDOWN_M
 /** Only send a busy notification if the current activity has been running for at least this long (ms). */
 export const BUSY_NOTIFY_MIN_DURATION_MS = Number(process.env.BUSY_NOTIFY_MIN_DURATION_MS || 30000);
 
+// ── Live Trace Thread ───────────────────────────────────────────────
+export const TRACE_THREAD_ENABLED =
+  String(process.env.TRACE_THREAD_ENABLED || "true").toLowerCase() !== "false";
+export const TRACE_THREAD_NAME = process.env.TRACE_THREAD_NAME || "⚙️ Live Trace";
+export const TRACE_FLUSH_INTERVAL_MS = Number(process.env.TRACE_FLUSH_INTERVAL_MS || 3000);
+
 export const MAX_ATTACHMENT_INLINE_BYTES = Number(process.env.MAX_ATTACHMENT_INLINE_BYTES || 100_000);
 export const MAX_ATTACHMENT_DOWNLOAD_BYTES = Number(process.env.MAX_ATTACHMENT_DOWNLOAD_BYTES || 10_000_000);
 export const ATTACHMENT_TTL_MS = Number(process.env.ATTACHMENT_TTL_MS || 3_600_000);

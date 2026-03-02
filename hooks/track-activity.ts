@@ -26,6 +26,9 @@ const ROOT_DIR = process.env.ORCHESTRATOR_DIR || join(__dirname, "..");
 const agentId = process.env.AGENT_ID || process.env.CLAUDE_AGENT_ID || "claude";
 const sessionId =
   process.env.DISCORD_SESSION_ID || process.env.BROKER_SESSION_ID || process.env.SESSION_ID || "default";
+const traceEnabled = String(process.env.TRACE_THREAD_ENABLED || "true").toLowerCase() !== "false";
+// In channel routing mode, agent_id IS the Discord channel ID
+const traceChannelId = agentId;
 
 const dbPath = join(ROOT_DIR, "data", "messages.db");
 
@@ -57,6 +60,20 @@ try {
     );
     CREATE INDEX IF NOT EXISTS idx_agent_activity_status
       ON agent_activity(status);
+
+    CREATE TABLE IF NOT EXISTS trace_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      session_id TEXT NOT NULL,
+      agent_id TEXT NOT NULL,
+      channel_id TEXT,
+      event_type TEXT NOT NULL,
+      tool_name TEXT,
+      summary TEXT,
+      posted INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_trace_events_pending
+      ON trace_events(posted, created_at);
   `);
 
   const now = new Date().toISOString();
@@ -82,6 +99,16 @@ try {
         updated_at = excluded.updated_at
     `).run(sessionId, agentId, toolName || "tool", summary, now, now);
 
+    // Write trace event for the live trace thread
+    if (traceEnabled) {
+      try {
+        db.prepare(`
+          INSERT INTO trace_events (session_id, agent_id, channel_id, event_type, tool_name, summary)
+          VALUES (?, ?, ?, 'tool_start', ?, ?)
+        `).run(sessionId, agentId, traceChannelId, toolName || "tool", summary);
+      } catch { /* fail-open */ }
+    }
+
     process.exit(0);
   }
 
@@ -103,6 +130,17 @@ try {
         started_at = NULL,
         updated_at = excluded.updated_at
     `).run(sessionId, agentId, now);
+
+    // Write trace event for the live trace thread
+    if (traceEnabled && hookEvent === "PostToolUse") {
+      try {
+        const summary = summarizeTool(toolName, toolInput);
+        db.prepare(`
+          INSERT INTO trace_events (session_id, agent_id, channel_id, event_type, tool_name, summary)
+          VALUES (?, ?, ?, 'tool_end', ?, ?)
+        `).run(sessionId, agentId, traceChannelId, toolName || "tool", summary);
+      } catch { /* fail-open */ }
+    }
   }
 } catch {
   // fail-open
