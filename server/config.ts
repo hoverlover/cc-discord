@@ -60,6 +60,8 @@ export const THINKING_FALLBACK_TEXT =
 
 export const BUSY_NOTIFY_ON_QUEUE = String(process.env.BUSY_NOTIFY_ON_QUEUE || "true").toLowerCase() !== "false";
 export const BUSY_NOTIFY_COOLDOWN_MS = Number(process.env.BUSY_NOTIFY_COOLDOWN_MS || 30000);
+/** Only send a busy notification if the current activity has been running for at least this long (ms). */
+export const BUSY_NOTIFY_MIN_DURATION_MS = Number(process.env.BUSY_NOTIFY_MIN_DURATION_MS || 30000);
 
 export const MAX_ATTACHMENT_INLINE_BYTES = Number(process.env.MAX_ATTACHMENT_INLINE_BYTES || 100_000);
 export const MAX_ATTACHMENT_DOWNLOAD_BYTES = Number(process.env.MAX_ATTACHMENT_DOWNLOAD_BYTES || 10_000_000);
