@@ -88,38 +88,8 @@ export AGENT_ID="$CHANNEL_ID"
 export CLAUDE_AGENT_ID="${CLAUDE_AGENT_ID:-claude-discord}"
 export CLAUDE_RUNTIME_ID="${CLAUDE_RUNTIME_ID:-rt_$(date +%s)_${RANDOM}}"
 
-# Determine Claude's project directory (where .claude/skills/ are discovered).
-# - CC_DISCORD_HOME overrides everything
-# - If cwd has a .claude/ directory (local dev / bun start from repo), use cwd
-# - Otherwise default to ~/.cc-discord (bunx / installed package)
-if [ -n "${CC_DISCORD_HOME:-}" ]; then
-  CLAUDE_PROJECT_DIR="$CC_DISCORD_HOME"
-elif [ -d ".claude" ]; then
-  CLAUDE_PROJECT_DIR="$(pwd)"
-else
-  CLAUDE_PROJECT_DIR="$HOME/.cc-discord"
-fi
-
-mkdir -p "$CLAUDE_PROJECT_DIR/.claude/skills"
-
-# Seed built-in skills from the package into the project directory.
-# Only copies skills that don't already exist (user modifications are preserved).
-if [ -d "$ROOT_DIR/.claude/skills" ] && [ "$ROOT_DIR" != "$CLAUDE_PROJECT_DIR" ]; then
-  for skill_dir in "$ROOT_DIR/.claude/skills"/*/; do
-    skill_name="$(basename "$skill_dir")"
-    if [ ! -d "$CLAUDE_PROJECT_DIR/.claude/skills/$skill_name" ]; then
-      cp -r "$skill_dir" "$CLAUDE_PROJECT_DIR/.claude/skills/$skill_name"
-      echo "[channel-agent:$CHANNEL_NAME] Seeded skill: $skill_name"
-    fi
-  done
-fi
-
-# Copy settings.json into the project dir so Claude sees it as a project config.
-if [ "$ROOT_DIR" != "$CLAUDE_PROJECT_DIR" ] && [ -f "$SETTINGS_PATH" ]; then
-  mkdir -p "$CLAUDE_PROJECT_DIR/.claude"
-  cp "$SETTINGS_PATH" "$CLAUDE_PROJECT_DIR/.claude/settings.json"
-fi
-
+# Project directory — inherited from start.sh, or derived here for standalone use.
+CLAUDE_PROJECT_DIR="${CC_DISCORD_HOME:-$HOME/.cc-discord}"
 cd "$CLAUDE_PROJECT_DIR"
 echo "[channel-agent:$CHANNEL_NAME] Claude project dir: $CLAUDE_PROJECT_DIR"
 

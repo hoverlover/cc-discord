@@ -69,6 +69,30 @@ if $log_setup; then
   echo "[start] Edit .env.relay and .env.worker in that directory, then restart."
 fi
 
+# Project directory for Claude (skills, settings). Exported for channel-agent.sh.
+export CC_DISCORD_HOME="${CC_DISCORD_HOME:-$HOME/.cc-discord}"
+mkdir -p "$CC_DISCORD_HOME/.claude/skills"
+
+# Seed built-in skills from the package into the project directory.
+if [ -d "$ROOT_DIR/.claude/skills" ] && [ "$ROOT_DIR" != "$CC_DISCORD_HOME" ]; then
+  for skill_dir in "$ROOT_DIR/.claude/skills"/*/; do
+    [ -d "$skill_dir" ] || continue
+    skill_name="$(basename "$skill_dir")"
+    if [ ! -d "$CC_DISCORD_HOME/.claude/skills/$skill_name" ]; then
+      cp -r "$skill_dir" "$CC_DISCORD_HOME/.claude/skills/$skill_name"
+      echo "[start] Seeded skill: $skill_name"
+    fi
+  done
+fi
+
+# Seed settings.json so Claude sees project config.
+if [ "$ROOT_DIR" != "$CC_DISCORD_HOME" ] && [ -f "$ROOT_DIR/.claude/settings.template.json" ]; then
+  bash "$ROOT_DIR/scripts/generate-settings.sh"
+  if [ -f "$ROOT_DIR/.claude/settings.json" ]; then
+    cp "$ROOT_DIR/.claude/settings.json" "$CC_DISCORD_HOME/.claude/settings.json"
+  fi
+fi
+
 # Log directory (shared with orchestrator and channel agents)
 export CC_DISCORD_LOG_DIR="${CC_DISCORD_LOG_DIR:-/tmp/cc-discord/logs}"
 mkdir -p "$CC_DISCORD_LOG_DIR"
