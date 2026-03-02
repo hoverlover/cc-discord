@@ -1,37 +1,43 @@
-# cc-discord (prototype)
+# cc-discord
 
-Quick-and-dirty **Discord ↔ Claude Code** relay using the same hook concept as `cc-dev-team`:
+**Discord <-> Claude Code relay** — power per-channel AI bots using your existing Claude subscription (no API key needed).
 
-- Discord messages are queued in SQLite
-- Claude hook (`check-discord-messages.js`) injects unread messages as context
-- Claude replies with `send-discord` tool (no terminal text injection)
+- Discord messages are stored in SQLite and delivered to Claude Code
+- One Claude instance per channel, each running autonomously
+- Replies sent back to Discord via `send-discord` tool
+- Typing indicators, memory context, and attachment support built in
 
-## What this prototype does
+## How it works
 
-- Listens to one Discord channel (or allowlist of channels)
-- Stores inbound messages in `data/messages.db`
-- Delivers them to Claude through hooks on:
-  - `SessionStart`
-  - `PostToolUse`
-  - `UserPromptSubmit`
-  - `Stop` (blocks stop if unread messages exist)
-- Provides tools:
-  - `send-discord "message"`
-  - `wait-for-discord-messages --deliver`
-- Adds Bash safety guardrails (blocks `run_in_background` and standalone `&` by default)
-- Shows a Discord typing indicator while Claude is working on a reply
+```
+Discord → relay server (stores messages in SQLite) → Claude subagent per channel
+Claude subagent reads messages → crafts reply → send-discord → Discord
+```
 
-## 1) Create Discord app + bot
+The relay server handles all Discord connectivity. The orchestrator spawns one Claude Code subagent per channel; each subagent loops indefinitely, polling for new messages and replying.
 
-1. Go to Discord Developer Portal
-2. Create app and Bot
-3. Enable intents:
-   - **Message Content Intent**
+---
+
+## 1) Create a Discord application and bot
+
+1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
+2. Click **New Application** and give it a name
+3. Go to the **Bot** section in the left sidebar
+4. Click **Add Bot**, then **Reset Token** and copy the bot token
+5. Enable the following **Privileged Gateway Intents**:
+   - **Message Content Intent** (required — without this the bot cannot read message text)
    - **Server Members Intent** (optional)
-4. Copy bot token
-5. Invite bot to your server with permissions to read/send in your target channel
+6. Go to **OAuth2 > URL Generator**:
+   - Under **Scopes**, select: `bot`, `applications.commands`
+   - Under **Bot Permissions**, select: `Send Messages`, `Read Messages/View Channels`, `Read Message History`
+7. Copy the generated URL and open it in your browser to invite the bot to your server
+8. In your Discord server, note the **channel ID(s)** you want the bot to respond in:
+   - Enable Developer Mode in Discord settings (User Settings > Advanced > Developer Mode)
+   - Right-click a channel and select **Copy Channel ID**
 
-## 2) Configure env (split relay/worker files)
+---
+
+## 2) Configure environment
 
 ```bash
 cp .env.relay.example .env.relay
@@ -40,68 +46,79 @@ cp .env.worker.example .env.worker
 
 ### Required in `.env.relay`
 
-- `DISCORD_BOT_TOKEN`
-- `DISCORD_CHANNEL_ID`
-- `RELAY_API_TOKEN` (**required by default**, recommended)
+| Variable | Description |
+|---|---|
+| `DISCORD_BOT_TOKEN` | Bot token from the Developer Portal |
+| `DISCORD_CHANNEL_ID` | Default channel ID the bot operates in |
+| `RELAY_API_TOKEN` | Shared secret between relay and worker (any random string) |
 
 ### Required in `.env.worker`
 
-- `DISCORD_SESSION_ID`
-- `CLAUDE_AGENT_ID`
-- `RELAY_API_TOKEN` (must match relay token when auth is enabled)
+| Variable | Description |
+|---|---|
+| `RELAY_API_TOKEN` | Must match the token in `.env.relay` |
 
-### Important: routing values must match across files
+### Optional `.env.relay` settings
 
-Set the same values in both files:
+| Variable | Default | Description |
+|---|---|---|
+| `DISCORD_ALLOWED_CHANNEL_IDS` | _(all)_ | Comma-separated list of allowed channel IDs |
+| `DISCORD_IGNORED_CHANNEL_IDS` | _(none)_ | Comma-separated list of channel IDs to ignore |
+| `ALLOWED_DISCORD_USER_IDS` | _(all)_ | Comma-separated list of user IDs that can interact |
+| `RELAY_HOST` | `127.0.0.1` | Host for the relay HTTP API |
+| `RELAY_PORT` | `3199` | Port for the relay HTTP API |
+| `RELAY_ALLOW_NO_AUTH` | `false` | Set `true` for local dev without a token |
+| `TYPING_INTERVAL_MS` | `8000` | How often to send the typing indicator |
+| `TYPING_MAX_MS` | `120000` | Max time to show typing before sending fallback |
+| `THINKING_FALLBACK_ENABLED` | `true` | Send a fallback message if Claude takes too long |
+| `THINKING_FALLBACK_TEXT` | _"Still working on that..."_ | Text of the fallback message |
+| `BUSY_NOTIFY_ON_QUEUE` | `true` | Notify user if Claude is busy when their message arrives |
+| `BUSY_NOTIFY_COOLDOWN_MS` | `30000` | Min time between busy notifications per activity |
 
-```env
-DISCORD_SESSION_ID=team1
-CLAUDE_AGENT_ID=claude-team1
-```
+### Optional `.env.worker` settings
 
-### Optional settings
+| Variable | Default | Description |
+|---|---|---|
+| `RELAY_HOST` | `127.0.0.1` | Relay server host |
+| `RELAY_PORT` | `3199` | Relay server port |
+| `RELAY_URL` | _(derived)_ | Full relay URL (overrides host/port) |
+| `DISCORD_SESSION_ID` | `default` | Session identifier for message routing |
+| `CLAUDE_AGENT_ID` | `claude` | Agent identifier for message routing |
+| `AUTO_REPLY_PERMISSION_MODE` | `skip` | `skip` (fully autonomous) or `accept-edits` (safer) |
+| `CLAUDE_RUNTIME_ID` | _(auto)_ | Runtime context identifier for memory |
+| `WAIT_QUIET_TIMEOUT` | `true` | Exit quietly on timeout (no noise in Claude UI) |
+| `BASH_POLICY_MODE` | `block` | `block` or `allow` for background bash ops |
+| `ALLOW_BASH_RUN_IN_BACKGROUND` | `true` | Allow `run_in_background=true` in Bash tool |
+| `ALLOW_BASH_BACKGROUND_OPS` | `false` | Allow `&` background operator in commands |
+| `BASH_POLICY_NOTIFY_ON_BLOCK` | `true` | Send Discord notification when bash is blocked |
+| `BASH_POLICY_NOTIFY_CHANNEL_ID` | _(none)_ | Channel to send bash policy notifications to |
 
-Relay-side (`.env.relay`):
-- `DISCORD_ALLOWED_CHANNEL_IDS` (comma list)
-- `ALLOWED_DISCORD_USER_IDS` (comma list of user IDs)
-- `RELAY_ALLOW_NO_AUTH` (`false` default; set `true` only for local dev)
-- `TYPING_INTERVAL_MS` (default: `8000`)
-- `TYPING_MAX_MS` (default: `120000`)
-- `THINKING_FALLBACK_ENABLED` (default: `true`)
-- `THINKING_FALLBACK_TEXT` (default: `Still working on that—thanks for your patience.`)
-- `BUSY_NOTIFY_ON_QUEUE` (default: `true`)
-- `BUSY_NOTIFY_COOLDOWN_MS` (default: `30000`)
+Security note: the worker process intentionally does not receive `DISCORD_BOT_TOKEN`.
 
-Worker-side (`.env.worker`):
-- `RELAY_HOST` / `RELAY_PORT` (or `RELAY_URL`)
-- `AUTO_REPLY_PERMISSION_MODE` (`skip` default, or `accept-edits`)
-- `CLAUDE_RUNTIME_ID` (optional runtime hint; auto-generated at start if omitted)
-- `WAIT_QUIET_TIMEOUT` (`true` default; timeout exits quietly)
-- `BASH_POLICY_MODE` (`block` default, or `allow` with notifications)
-- `ALLOW_BASH_RUN_IN_BACKGROUND` (`false` default)
-- `ALLOW_BASH_BACKGROUND_OPS` (`false` default)
-- `BASH_POLICY_NOTIFY_ON_BLOCK` (`true` default)
-- `BASH_POLICY_NOTIFY_CHANNEL_ID` (optional)
+---
 
-`npm start` loads `.env.relay` and `npm run start:autoreply` loads `.env.worker`.
-Legacy single-file `.env` is still supported as fallback.
-Existing exported shell vars still take precedence for one-off overrides.
-
-Security note: `start:autoreply` intentionally loads only worker-safe env vars and does **not** pass `DISCORD_BOT_TOKEN` to Claude.
-
-### Hardening defaults
-
-- Relay API auth is **required** unless `RELAY_ALLOW_NO_AUTH=true`.
-- Keep `RELAY_HOST=127.0.0.1` unless you intentionally expose relay externally.
-- Restrict channels with `DISCORD_ALLOWED_CHANNEL_IDS`.
-- Optionally restrict users with `ALLOWED_DISCORD_USER_IDS`.
-- Bash safety guard blocks risky background patterns by default and sends Discord notifications when triggered.
-
-## 3) Install + start relay
+## 3) Install dependencies
 
 ```bash
-npm install
-npm start
+bun install
+```
+
+---
+
+## 4) Generate Claude settings
+
+```bash
+bun run generate-settings
+```
+
+This creates `.claude/settings.json` with absolute hook paths for your machine.
+
+---
+
+## 5) Start the relay server
+
+```bash
+bun start
 ```
 
 Health check:
@@ -110,126 +127,91 @@ Health check:
 curl http://127.0.0.1:3199/health
 ```
 
-## 4) Generate Claude settings
+---
+
+## 6) Start the orchestrator
+
+In a second terminal:
 
 ```bash
-npm run generate-settings
+bun run start:orchestrator
 ```
 
-This creates:
+The orchestrator discovers all allowed channels, spawns one Claude subagent per channel, and keeps them healthy.
 
-- `.claude/settings.json` with absolute hook path
+**Startup sequence:**
+1. `bun start` — relay server (Discord bot + HTTP API)
+2. `bun run start:orchestrator` — Claude orchestrator (spawns channel subagents)
 
-## 5) Run Claude Code with this settings file
-
-Example:
-
-```bash
-claude --settings /Users/cboyd/code/cc-discord/.claude/settings.json
-```
-
-Make sure tools are on PATH for Claude session:
-
-```bash
-export PATH="/Users/cboyd/code/cc-discord/tools:$PATH"
-```
-
-Then Claude can call:
-
-```bash
-send-discord "Got it — working on this now."
-```
-
-## 6) Automatic reply mode (no manual prompting)
-
-Start Claude in auto-reply mode:
-
-```bash
-cd /Users/cboyd/code/cc-discord
-npm run start:autoreply
-```
-
-By default this runs Claude with:
-
-```bash
---dangerously-skip-permissions
-```
-
-so it does not stall on approval prompts.
-
-If you want safer behavior, set this in `.env`:
-
-```env
-AUTO_REPLY_PERMISSION_MODE=accept-edits
-```
-
-(or run once with `AUTO_REPLY_PERMISSION_MODE=accept-edits npm run start:autoreply`).
-
-What this does:
-
-- loads `.claude/settings.json` (hooks enabled)
-- adds an auto-reply system prompt (`prompts/autoreply-system.md`)
-- starts an infinite loop:
-  1. `wait-for-discord-messages --deliver --timeout 600`
-  2. if output contains new messages, read and respond
-  3. `send-discord "...reply..."`
-  4. repeat
-
-The wait command now enforces a singleton PID lock per agent/session to prevent stacked pollers.
-Timeouts are quiet by default and return exit code 0 (to reduce noisy background failure spam).
-
-Run relay (`npm start`) and auto-reply Claude in separate terminals.
+---
 
 ## Typing indicator behavior
 
-- When a non-bot Discord message arrives in an allowed channel, relay starts a typing heartbeat for that channel.
-- Heartbeat repeats every `TYPING_INTERVAL_MS` (default 8s).
-- Heartbeat stops when Claude sends a reply through `send-discord`.
-- Safety timeout auto-stops typing after `TYPING_MAX_MS` (default 120s).
-- When typing times out, relay can post a fallback status message (`THINKING_FALLBACK_TEXT`) if `THINKING_FALLBACK_ENABLED=true`.
-- If Claude is currently busy on a different tool, relay can send a queued notice:
-  - "Currently busy with X, queued your message..." (configurable via `BUSY_NOTIFY_*`).
+- When a user sends a message, the relay immediately starts a typing indicator in that channel
+- The typing heartbeat repeats every `TYPING_INTERVAL_MS` (default 8s)
+- The indicator stops automatically when Claude sends a reply via `send-discord`
+- After `TYPING_MAX_MS` (default 120s), the relay posts a fallback patience message
+- If Claude is busy on another task when a message arrives, a queued notification is sent
 
-If you change typing/busy-notify env vars, restart the relay process.
+---
 
-## Message format in Claude context
+## Message format delivered to Claude
 
-Hook injects inbox messages and (when available) selected memory context:
-
-```text
-NEW DISCORD MESSAGE(S): [MESSAGE from discord:123...] [DISCORD_MESSAGE]: username: hello
+```
+NEW DISCORD MESSAGE(S): [MESSAGE from discord:123...] [channel:456...] [DISCORD_MESSAGE]: username: hello
 
 MEMORY CONTEXT:
-Session summary:
-...
-Relevant long-term memory (outside current window):
+Relevant prior turns (outside current window):
 ...
 ```
 
-Memory retrieval is runtime-aware: it avoids re-injecting turns from the current Claude runtime context, while prioritizing relevant older memory (and compacted summaries) outside that context. `SessionStart` events (including `/new`) rotate runtime context for recall filtering.
+Memory retrieval avoids re-injecting turns from the current Claude session, while surfacing relevant older context.
 
-## Notes / limitations (prototype)
+---
 
-- Single-session default (`DISCORD_SESSION_ID=default`)
-- Polling-based wait tool (no FIFO wake optimization yet)
-- Relay API token auth is enabled by default (`RELAY_ALLOW_NO_AUTH=false`)
-- No thread mapping yet
+## /model slash command
 
-## Memory module (v1 foundation)
+Use `/model` in any channel to get or set the Claude model for that channel:
 
-A pluggable memory foundation now exists under `memory/` with SQLite as primary store.
+- `/model` — show the current model
+- `/model name:claude-opus-4-6` — set the model (accepts full model IDs)
+- `/model name:clear` — reset to default
+
+---
+
+## Memory module
+
+A pluggable memory foundation exists under `memory/` with SQLite as the primary store.
 
 Run a quick validation:
 
 ```bash
-npm run memory:smoke
+bun run memory:smoke
 ```
 
-This verifies schema init, idempotent batch writes, snapshots, turns, and cards.
+---
 
-## Next polish steps
+## Interactive mode (manual use)
 
-- Discord thread ↔ Claude session mapping
-- FIFO wake-up path (like `cc-dev-team`)
-- better rate limit/retry/chunking for long outputs
-- automated tests for hook/tool behavior
+If you want to run Claude interactively rather than in autonomous mode:
+
+```bash
+# Generate settings first
+bun run generate-settings
+
+# Add tools to PATH and start Claude manually
+export PATH="/path/to/cc-discord/tools:$PATH"
+claude --settings /path/to/cc-discord/.claude/settings.json
+```
+
+Claude will receive Discord messages via hooks and can reply with `send-discord`.
+
+---
+
+## Next steps
+
+- Discord thread <-> Claude session mapping
+- FIFO wake-up path for lower latency
+- Headless daemon mode (no interactive terminal required)
+- Rate limit / retry / chunking for long outputs
+- Automated test suite

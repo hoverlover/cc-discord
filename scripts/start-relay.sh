@@ -8,5 +8,8 @@ load_env_file "$ROOT_DIR/.env.relay"
 # Legacy fallback (single-file mode)
 load_env_file "$ROOT_DIR/.env"
 
+# Ensure bun is on PATH (launchd doesn't inherit user shell PATH)
+export PATH="$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 cd "$ROOT_DIR"
-node server/index.js
+exec bun server/index.ts

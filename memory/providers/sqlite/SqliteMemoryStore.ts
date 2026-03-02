@@ -1,18 +1,11 @@
-import { randomUUID } from 'node:crypto'
-import { mkdirSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
-import { MemoryStore } from '../../core/MemoryStore.js'
-import {
-  MemoryCardTypes,
-  MemoryScopes,
-  clamp,
-  nowIso,
-  safeJsonParse,
-  safeJsonStringify,
-} from '../../core/types.js'
+import { Database } from "bun:sqlite";
+import { randomUUID } from "node:crypto";
+import { mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { MemoryStore } from "../../core/MemoryStore.ts";
+import { clamp, MemoryCardTypes, MemoryScopes, nowIso, safeJsonParse, safeJsonStringify } from "../../core/types.ts";
 
-const DEFAULT_DB_PATH = join(process.cwd(), 'data', 'memory.db')
+const DEFAULT_DB_PATH = join(process.cwd(), "data", "memory.db");
 
 const SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS memory_sessions (
@@ -105,51 +98,52 @@ const SCHEMA_SQL = `
     ON memory_sync_jobs(status, next_attempt_at);
   CREATE INDEX IF NOT EXISTS idx_memory_runtime_state_context
     ON memory_runtime_state(runtime_context_id);
-`
+`;
 
 export class SqliteMemoryStore extends MemoryStore {
-  /**
-   * @param {{ dbPath?: string, logger?: Pick<Console, 'log' | 'warn' | 'error'> }} [options]
-   */
-  constructor(options = {}) {
-    super('sqlite', {
+  dbPath: string;
+  logger: Pick<Console, "log" | "warn" | "error">;
+  db: InstanceType<typeof Database> | null;
+
+  constructor(options: { dbPath?: string; logger?: Pick<Console, "log" | "warn" | "error"> } = {}) {
+    super("sqlite", {
       atomicBatch: true,
       fullTextSearch: false,
       vectorSearch: false,
       bidirectionalSync: false,
-    })
+    });
 
-    this.dbPath = options.dbPath || DEFAULT_DB_PATH
-    this.logger = options.logger || console
-    this.db = null
+    this.dbPath = options.dbPath || DEFAULT_DB_PATH;
+    this.logger = options.logger || console;
+    this.db = null;
   }
 
   async init() {
-    if (this.db) return
+    if (this.db) return;
 
-    mkdirSync(dirname(this.dbPath), { recursive: true })
-    this.db = new DatabaseSync(this.dbPath)
-    this.db.exec('PRAGMA journal_mode = WAL;')
-    this.db.exec('PRAGMA foreign_keys = ON;')
-    this.db.exec(SCHEMA_SQL)
+    mkdirSync(dirname(this.dbPath), { recursive: true });
+    this.db = new Database(this.dbPath);
+    this.db.exec("PRAGMA journal_mode = WAL;");
+    this.db.exec("PRAGMA foreign_keys = ON;");
+    this.db.exec(SCHEMA_SQL);
   }
 
   async health() {
     try {
-      await this.init()
-      const db = this.#requireDb()
-      const row = db.prepare('SELECT 1 as ok').get()
-      return { ok: row?.ok === 1, details: this.dbPath }
-    } catch (err) {
-      return { ok: false, details: err?.message || String(err) }
+      await this.init();
+      const db = this.#requireDb();
+      const row = db.prepare("SELECT 1 as ok").get() as any;
+      return { ok: row?.ok === 1, details: this.dbPath };
+    } catch (err: any) {
+      return { ok: false, details: err?.message || String(err) };
     }
   }
 
-  async writeBatch(inputBatch) {
-    await this.init()
+  async writeBatch(inputBatch: any) {
+    await this.init();
 
-    const batch = normalizeBatch(inputBatch)
-    const db = this.#requireDb()
+    const batch = normalizeBatch(inputBatch);
+    const db = this.#requireDb();
 
     const result = {
       ok: true,
@@ -162,45 +156,51 @@ export class SqliteMemoryStore extends MemoryStore {
         cardsUpserted: 0,
         cardsDeleted: 0,
       },
-    }
+    };
 
-    let attempts = 0
+    let attempts = 0;
     while (true) {
-      attempts++
+      attempts++;
       try {
-        db.exec('BEGIN IMMEDIATE')
+        db.exec("BEGIN IMMEDIATE");
 
-        const existingBatch = db.prepare(`
+        const existingBatch = db
+          .prepare(`
           SELECT batch_id
           FROM memory_batch_log
           WHERE batch_id = ?
-        `).get(batch.batchId)
+        `)
+          .get(batch.batchId);
 
         if (existingBatch) {
-          db.exec('COMMIT')
-          result.idempotent = true
-          return result
+          db.exec("COMMIT");
+          result.idempotent = true;
+          return result;
         }
 
-        const now = nowIso()
-        ensureSessionRow(db, batch.sessionKey, batch.agentId, now)
+        const now = nowIso();
+        ensureSessionRow(db, batch.sessionKey, batch.agentId, now);
 
         db.prepare(`
           INSERT INTO memory_batch_log (batch_id, session_key, created_at)
           VALUES (?, ?, ?)
-        `).run(batch.batchId, batch.sessionKey, now)
+        `).run(batch.batchId, batch.sessionKey, now);
 
         if (batch.turns.length > 0) {
-          let nextTurnIndex = db.prepare(`
+          let nextTurnIndex = (
+            db
+              .prepare(`
             SELECT COALESCE(MAX(turn_index), -1) + 1 AS next_index
             FROM memory_turns
             WHERE session_key = ?
-          `).get(batch.sessionKey).next_index
+          `)
+              .get(batch.sessionKey) as any
+          ).next_index;
 
           for (const turn of batch.turns) {
-            let turnIndex = Number.isInteger(turn.turnIndex) ? turn.turnIndex : nextTurnIndex
+            const turnIndex = Number.isInteger(turn.turnIndex) ? turn.turnIndex : nextTurnIndex;
             if (turnIndex >= nextTurnIndex) {
-              nextTurnIndex = turnIndex + 1
+              nextTurnIndex = turnIndex + 1;
             }
 
             db.prepare(`
@@ -219,11 +219,11 @@ export class SqliteMemoryStore extends MemoryStore {
               turnIndex,
               turn.role,
               turn.content,
-              safeJsonStringify(turn.metadata, 'null'),
+              safeJsonStringify(turn.metadata, "null"),
               turn.createdAt,
-            )
+            );
 
-            result.counts.turns++
+            result.counts.turns++;
           }
         }
 
@@ -242,13 +242,13 @@ export class SqliteMemoryStore extends MemoryStore {
             batch.snapshot.id,
             batch.sessionKey,
             batch.snapshot.summaryText,
-            safeJsonStringify(batch.snapshot.openTasks, '[]'),
-            safeJsonStringify(batch.snapshot.decisions, '[]'),
+            safeJsonStringify(batch.snapshot.openTasks, "[]"),
+            safeJsonStringify(batch.snapshot.decisions, "[]"),
             batch.snapshot.compactedToTurnId,
             batch.snapshot.createdAt,
-          )
+          );
 
-          result.counts.snapshots++
+          result.counts.snapshots++;
         }
 
         if (batch.cardsUpsert.length > 0) {
@@ -295,24 +295,24 @@ export class SqliteMemoryStore extends MemoryStore {
               card.expiresAt,
               card.createdAt,
               card.updatedAt,
-            )
-            result.counts.cardsUpserted++
+            );
+            result.counts.cardsUpserted++;
           }
         }
 
         if (batch.cardsDelete.length > 0) {
-          const placeholders = batch.cardsDelete.map(() => '?').join(',')
-          const deleteResult = db.prepare(`
+          const placeholders = batch.cardsDelete.map(() => "?").join(",");
+          const deleteResult = db
+            .prepare(`
             DELETE FROM memory_cards
             WHERE id IN (${placeholders})
-          `).run(...batch.cardsDelete)
-          result.counts.cardsDeleted += deleteResult.changes || 0
+          `)
+            .run(...batch.cardsDelete);
+          result.counts.cardsDeleted += (deleteResult as any).changes || 0;
         }
 
         const compactedToTurnId =
-          batch.compactedToTurnId !== undefined
-            ? batch.compactedToTurnId
-            : batch.snapshot?.compactedToTurnId
+          batch.compactedToTurnId !== undefined ? batch.compactedToTurnId : batch.snapshot?.compactedToTurnId;
 
         if (compactedToTurnId !== undefined) {
           db.prepare(`
@@ -321,137 +321,144 @@ export class SqliteMemoryStore extends MemoryStore {
             ON CONFLICT(session_key) DO UPDATE SET
               last_compacted_turn_id = excluded.last_compacted_turn_id,
               updated_at = excluded.updated_at
-          `).run(batch.sessionKey, compactedToTurnId, nowIso())
+          `).run(batch.sessionKey, compactedToTurnId, nowIso());
         }
 
-        db.exec('COMMIT')
-        return result
+        db.exec("COMMIT");
+        return result;
       } catch (err) {
-        try { db.exec('ROLLBACK') } catch { /* ignore */ }
+        try {
+          db.exec("ROLLBACK");
+        } catch {
+          /* ignore */
+        }
 
         if (isSqliteBusy(err) && attempts < 4) {
-          this.logger.warn?.(`[Memory] SQLite busy, retrying writeBatch (attempt ${attempts}/4)`)
-          continue
+          this.logger.warn?.(`[Memory] SQLite busy, retrying writeBatch (attempt ${attempts}/4)`);
+          continue;
         }
 
-        throw err
+        throw err;
       }
     }
   }
 
-  async readSessionSnapshot(sessionKey) {
-    await this.init()
-    const key = normalizeSessionKey(sessionKey)
+  async readSessionSnapshot(sessionKey: string) {
+    await this.init();
+    const key = normalizeSessionKey(sessionKey);
 
-    const db = this.#requireDb()
-    const row = db.prepare(`
+    const db = this.#requireDb();
+    const row = db
+      .prepare(`
       SELECT id, session_key, summary_text, open_tasks_json, decisions_json, compacted_to_turn_id, created_at
       FROM memory_snapshots
       WHERE session_key = ?
       ORDER BY created_at DESC, rowid DESC
       LIMIT 1
-    `).get(key)
+    `)
+      .get(key) as any;
 
-    if (!row) return null
-    return mapSnapshotRow(row)
+    if (!row) return null;
+    return mapSnapshotRow(row);
   }
 
-  async listTurns(input) {
-    await this.init()
+  async listTurns(input: any) {
+    await this.init();
 
-    const { sessionKey, afterTurnId = null, limit = 50 } = input || {}
-    const key = normalizeSessionKey(sessionKey)
-    const safeLimit = clamp(Number(limit) || 50, 1, 500)
+    const { sessionKey, afterTurnId = null, limit = 50 } = input || {};
+    const key = normalizeSessionKey(sessionKey);
+    const safeLimit = clamp(Number(limit) || 50, 1, 500);
 
-    const db = this.#requireDb()
+    const db = this.#requireDb();
 
-    let afterIndex = -1
+    let afterIndex = -1;
     if (afterTurnId) {
-      const row = db.prepare(`
+      const row = db
+        .prepare(`
         SELECT turn_index
         FROM memory_turns
         WHERE session_key = ? AND id = ?
         LIMIT 1
-      `).get(key, String(afterTurnId))
+      `)
+        .get(key, String(afterTurnId)) as any;
 
-      if (row) afterIndex = row.turn_index
+      if (row) afterIndex = row.turn_index;
     }
 
-    const rows = db.prepare(`
+    const rows = db
+      .prepare(`
       SELECT id, session_key, turn_index, role, content, metadata_json, created_at
       FROM memory_turns
       WHERE session_key = ?
         AND turn_index > ?
       ORDER BY turn_index ASC
       LIMIT ?
-    `).all(key, afterIndex, safeLimit)
+    `)
+      .all(key, afterIndex, safeLimit) as any[];
 
-    return rows.map(mapTurnRow)
+    return rows.map(mapTurnRow);
   }
 
-  async listRecentTurns(input = {}) {
-    await this.init()
+  async listRecentTurns(input: { sessionKey: string; limit?: number } = { sessionKey: "" }) {
+    await this.init();
 
-    const { sessionKey, limit = 20 } = input
-    const key = normalizeSessionKey(sessionKey)
-    const safeLimit = clamp(Number(limit) || 20, 1, 2000)
+    const { sessionKey, limit = 20 } = input;
+    const key = normalizeSessionKey(sessionKey);
+    const safeLimit = clamp(Number(limit) || 20, 1, 2000);
 
-    const db = this.#requireDb()
-    const rows = db.prepare(`
+    const db = this.#requireDb();
+    const rows = db
+      .prepare(`
       SELECT id, session_key, turn_index, role, content, metadata_json, created_at
       FROM memory_turns
       WHERE session_key = ?
       ORDER BY turn_index DESC
       LIMIT ?
-    `).all(key, safeLimit)
+    `)
+      .all(key, safeLimit) as any[];
 
     // Return ascending for chronological readability
-    rows.reverse()
-    return rows.map(mapTurnRow)
+    rows.reverse();
+    return rows.map(mapTurnRow);
   }
 
-  async queryCards(input = {}) {
-    await this.init()
+  async queryCards(
+    input: { sessionKey?: string; scope?: string; cardType?: string; includeExpired?: boolean; limit?: number } = {},
+  ) {
+    await this.init();
 
-    const {
-      sessionKey,
-      scope,
-      cardType,
-      includeExpired = false,
-      limit = 50,
-    } = input
+    const { sessionKey, scope, cardType, includeExpired = false, limit = 50 } = input;
 
-    const safeLimit = clamp(Number(limit) || 50, 1, 500)
-    const db = this.#requireDb()
+    const safeLimit = clamp(Number(limit) || 50, 1, 500);
+    const db = this.#requireDb();
 
-    const conditions = []
-    const params = []
+    const conditions: string[] = [];
+    const params: any[] = [];
 
     if (sessionKey) {
-      conditions.push('session_key = ?')
-      params.push(normalizeSessionKey(sessionKey))
+      conditions.push("session_key = ?");
+      params.push(normalizeSessionKey(sessionKey));
     }
 
     if (scope) {
-      conditions.push('scope = ?')
-      params.push(String(scope))
+      conditions.push("scope = ?");
+      params.push(String(scope));
     }
 
     if (cardType) {
-      conditions.push('card_type = ?')
-      params.push(String(cardType))
+      conditions.push("card_type = ?");
+      params.push(String(cardType));
     }
 
     if (!includeExpired) {
-      conditions.push('(expires_at IS NULL OR expires_at > ?)')
-      params.push(nowIso())
+      conditions.push("(expires_at IS NULL OR expires_at > ?)");
+      params.push(nowIso());
     }
 
-    const whereClause = conditions.length > 0
-      ? `WHERE ${conditions.join(' AND ')}`
-      : ''
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-    const rows = db.prepare(`
+    const rows = db
+      .prepare(`
       SELECT
         id,
         session_key,
@@ -470,86 +477,92 @@ export class SqliteMemoryStore extends MemoryStore {
       ${whereClause}
       ORDER BY pinned DESC, updated_at DESC
       LIMIT ?
-    `).all(...params, safeLimit)
+    `)
+      .all(...params, safeLimit) as any[];
 
-    return rows.map(mapCardRow)
+    return rows.map(mapCardRow);
   }
 
-  async readCompactionState(sessionKey) {
-    await this.init()
-    const key = normalizeSessionKey(sessionKey)
+  async readCompactionState(sessionKey: string) {
+    await this.init();
+    const key = normalizeSessionKey(sessionKey);
 
-    const db = this.#requireDb()
-    const row = db.prepare(`
+    const db = this.#requireDb();
+    const row = db
+      .prepare(`
       SELECT session_key, last_compacted_turn_id, updated_at
       FROM memory_compaction_state
       WHERE session_key = ?
       LIMIT 1
-    `).get(key)
+    `)
+      .get(key) as any;
 
-    if (!row) return null
+    if (!row) return null;
     return {
       sessionKey: row.session_key,
       lastCompactedTurnId: row.last_compacted_turn_id,
       updatedAt: row.updated_at,
-    }
+    };
   }
 
-  async getTurnById(input = {}) {
-    await this.init()
+  async getTurnById(input: { sessionKey?: string; turnId?: string } = {}) {
+    await this.init();
 
-    const { sessionKey, turnId } = input
-    const key = normalizeSessionKey(sessionKey)
-    const id = nullableString(turnId)
-    if (!id) return null
+    const { sessionKey, turnId } = input;
+    const key = normalizeSessionKey(sessionKey);
+    const id = nullableString(turnId);
+    if (!id) return null;
 
-    const db = this.#requireDb()
-    const row = db.prepare(`
+    const db = this.#requireDb();
+    const row = db
+      .prepare(`
       SELECT id, session_key, turn_index, role, content, metadata_json, created_at
       FROM memory_turns
       WHERE session_key = ?
         AND id = ?
       LIMIT 1
-    `).get(key, id)
+    `)
+      .get(key, id) as any;
 
-    if (!row) return null
-    return mapTurnRow(row)
+    if (!row) return null;
+    return mapTurnRow(row);
   }
 
-  async readRuntimeState(sessionKey) {
-    await this.init()
-    const key = normalizeSessionKey(sessionKey)
+  async readRuntimeState(sessionKey: string) {
+    await this.init();
+    const key = normalizeSessionKey(sessionKey);
 
-    const db = this.#requireDb()
-    const row = db.prepare(`
+    const db = this.#requireDb();
+    const row = db
+      .prepare(`
       SELECT session_key, runtime_context_id, runtime_epoch, updated_at
       FROM memory_runtime_state
       WHERE session_key = ?
       LIMIT 1
-    `).get(key)
+    `)
+      .get(key) as any;
 
-    if (!row) return null
+    if (!row) return null;
     return {
       sessionKey: row.session_key,
       runtimeContextId: row.runtime_context_id,
       runtimeEpoch: row.runtime_epoch,
       updatedAt: row.updated_at,
-    }
+    };
   }
 
-  async upsertRuntimeState(input = {}) {
-    await this.init()
+  async upsertRuntimeState(input: { sessionKey?: string; runtimeContextId?: string; runtimeEpoch?: number } = {}) {
+    await this.init();
 
-    const sessionKey = normalizeSessionKey(input.sessionKey)
-    const runtimeContextId = nullableString(input.runtimeContextId) || makeRuntimeContextId('upsert')
-    const runtimeEpoch = Number.isInteger(input.runtimeEpoch) && input.runtimeEpoch > 0
-      ? input.runtimeEpoch
-      : 1
+    const sessionKey = normalizeSessionKey(input.sessionKey);
+    const runtimeContextId = nullableString(input.runtimeContextId) || makeRuntimeContextId("upsert");
+    const runtimeEpoch =
+      Number.isInteger(input.runtimeEpoch) && (input.runtimeEpoch as number) > 0 ? (input.runtimeEpoch as number) : 1;
 
-    const db = this.#requireDb()
-    const now = nowIso()
+    const db = this.#requireDb();
+    const now = nowIso();
 
-    ensureSessionRow(db, sessionKey, null, now)
+    ensureSessionRow(db, sessionKey, null, now);
 
     db.prepare(`
       INSERT INTO memory_runtime_state (session_key, runtime_context_id, runtime_epoch, updated_at)
@@ -558,41 +571,43 @@ export class SqliteMemoryStore extends MemoryStore {
         runtime_context_id = excluded.runtime_context_id,
         runtime_epoch = excluded.runtime_epoch,
         updated_at = excluded.updated_at
-    `).run(sessionKey, runtimeContextId, runtimeEpoch, now)
+    `).run(sessionKey, runtimeContextId, runtimeEpoch, now);
 
     return {
       sessionKey,
       runtimeContextId,
       runtimeEpoch,
       updatedAt: now,
-    }
+    };
   }
 
-  async bumpRuntimeContext(input = {}) {
-    await this.init()
+  async bumpRuntimeContext(input: { sessionKey?: string; runtimeContextId?: string } = {}) {
+    await this.init();
 
-    const sessionKey = normalizeSessionKey(input.sessionKey)
-    const requestedRuntimeContextId = nullableString(input.runtimeContextId)
-    const db = this.#requireDb()
+    const sessionKey = normalizeSessionKey(input.sessionKey);
+    const requestedRuntimeContextId = nullableString(input.runtimeContextId);
+    const db = this.#requireDb();
 
-    let attempts = 0
+    let attempts = 0;
     while (true) {
-      attempts++
+      attempts++;
       try {
-        db.exec('BEGIN IMMEDIATE')
+        db.exec("BEGIN IMMEDIATE");
 
-        const current = db.prepare(`
+        const current = db
+          .prepare(`
           SELECT runtime_context_id, runtime_epoch
           FROM memory_runtime_state
           WHERE session_key = ?
           LIMIT 1
-        `).get(sessionKey)
+        `)
+          .get(sessionKey) as any;
 
-        const nextEpoch = current ? Number(current.runtime_epoch || 0) + 1 : 1
-        const nextContextId = requestedRuntimeContextId || makeRuntimeContextId(`epoch${nextEpoch}`)
-        const now = nowIso()
+        const nextEpoch = current ? Number(current.runtime_epoch || 0) + 1 : 1;
+        const nextContextId = requestedRuntimeContextId || makeRuntimeContextId(`epoch${nextEpoch}`);
+        const now = nowIso();
 
-        ensureSessionRow(db, sessionKey, null, now)
+        ensureSessionRow(db, sessionKey, null, now);
 
         db.prepare(`
           INSERT INTO memory_runtime_state (session_key, runtime_context_id, runtime_epoch, updated_at)
@@ -601,60 +616,64 @@ export class SqliteMemoryStore extends MemoryStore {
             runtime_context_id = excluded.runtime_context_id,
             runtime_epoch = excluded.runtime_epoch,
             updated_at = excluded.updated_at
-        `).run(sessionKey, nextContextId, nextEpoch, now)
+        `).run(sessionKey, nextContextId, nextEpoch, now);
 
-        db.exec('COMMIT')
+        db.exec("COMMIT");
 
         return {
           sessionKey,
           runtimeContextId: nextContextId,
           runtimeEpoch: nextEpoch,
           updatedAt: now,
-        }
+        };
       } catch (err) {
-        try { db.exec('ROLLBACK') } catch { /* ignore */ }
+        try {
+          db.exec("ROLLBACK");
+        } catch {
+          /* ignore */
+        }
 
         if (isSqliteBusy(err) && attempts < 4) {
-          this.logger.warn?.(`[Memory] SQLite busy, retrying bumpRuntimeContext (attempt ${attempts}/4)`)
-          continue
+          this.logger.warn?.(`[Memory] SQLite busy, retrying bumpRuntimeContext (attempt ${attempts}/4)`);
+          continue;
         }
 
-        throw err
+        throw err;
       }
     }
   }
 
   async close() {
-    if (!this.db) return
+    if (!this.db) return;
     try {
-      this.db.close()
+      this.db.close();
     } finally {
-      this.db = null
+      this.db = null;
     }
   }
 
-  #requireDb() {
+  #requireDb(): InstanceType<typeof Database> {
     if (!this.db) {
-      throw new Error('SqliteMemoryStore is not initialized. Call init() first.')
+      throw new Error("SqliteMemoryStore is not initialized. Call init() first.");
     }
-    return this.db
+    return this.db;
   }
 }
 
-function normalizeBatch(batch) {
-  if (!batch || typeof batch !== 'object') {
-    throw new Error('writeBatch() requires a batch object')
+function normalizeBatch(batch: any) {
+  if (!batch || typeof batch !== "object") {
+    throw new Error("writeBatch() requires a batch object");
   }
 
-  const sessionKey = normalizeSessionKey(batch.sessionKey)
-  const batchId = String(batch.batchId || batch.id || '').trim()
+  const sessionKey = normalizeSessionKey(batch.sessionKey);
+  const batchId = String(batch.batchId || batch.id || "").trim();
   if (!batchId) {
-    throw new Error('writeBatch() requires batch.batchId (or batch.id)')
+    throw new Error("writeBatch() requires batch.batchId (or batch.id)");
   }
 
-  const compactedToTurnId = Object.prototype.hasOwnProperty.call(batch, 'compactedToTurnId')
+  const compactedToTurnId = Object.hasOwn(batch, "compactedToTurnId")
     ? nullableString(batch.compactedToTurnId)
-    : undefined
+    : undefined;
 
   return {
     batchId,
@@ -665,21 +684,21 @@ function normalizeBatch(batch) {
     cardsUpsert: normalizeCards(batch.cardsUpsert),
     cardsDelete: normalizeCardDeletes(batch.cardsDelete),
     compactedToTurnId,
-  }
+  };
 }
 
-function normalizeSessionKey(sessionKey) {
-  const key = String(sessionKey || '').trim()
-  if (!key) throw new Error('sessionKey is required')
-  return key
+function normalizeSessionKey(sessionKey: any): string {
+  const key = String(sessionKey || "").trim();
+  if (!key) throw new Error("sessionKey is required");
+  return key;
 }
 
-function normalizeTurns(turns) {
-  if (!Array.isArray(turns)) return []
+function normalizeTurns(turns: any) {
+  if (!Array.isArray(turns)) return [];
 
-  return turns.map((turn) => {
-    const role = String(turn?.role || 'user').trim() || 'user'
-    const content = String(turn?.content || '')
+  return turns.map((turn: any) => {
+    const role = String(turn?.role || "user").trim() || "user";
+    const content = String(turn?.content || "");
 
     return {
       id: nullableString(turn?.id) || `turn_${randomUUID()}`,
@@ -688,34 +707,34 @@ function normalizeTurns(turns) {
       turnIndex: Number.isInteger(turn?.turnIndex) ? turn.turnIndex : null,
       metadata: turn?.metadata ?? null,
       createdAt: nullableString(turn?.createdAt) || nowIso(),
-    }
-  })
+    };
+  });
 }
 
-function normalizeSnapshot(snapshot) {
+function normalizeSnapshot(snapshot: any) {
   return {
     id: nullableString(snapshot?.id) || `snapshot_${randomUUID()}`,
-    summaryText: String(snapshot?.summaryText || snapshot?.summary || ''),
+    summaryText: String(snapshot?.summaryText || snapshot?.summary || ""),
     openTasks: Array.isArray(snapshot?.openTasks) ? snapshot.openTasks : [],
     decisions: Array.isArray(snapshot?.decisions) ? snapshot.decisions : [],
     compactedToTurnId: nullableString(snapshot?.compactedToTurnId),
     createdAt: nullableString(snapshot?.createdAt) || nowIso(),
-  }
+  };
 }
 
-function normalizeCards(cards) {
-  if (!Array.isArray(cards)) return []
+function normalizeCards(cards: any) {
+  if (!Array.isArray(cards)) return [];
 
-  return cards.map((card) => {
-    const scope = normalizeScope(card?.scope)
-    const cardType = normalizeCardType(card?.cardType || card?.type)
+  return cards.map((card: any) => {
+    const scope = normalizeScope(card?.scope);
+    const cardType = normalizeCardType(card?.cardType || card?.type);
 
     return {
       id: nullableString(card?.id) || `card_${randomUUID()}`,
       scope,
       cardType,
-      title: String(card?.title || ''),
-      body: String(card?.body || card?.content || ''),
+      title: String(card?.title || ""),
+      body: String(card?.body || card?.content || ""),
       confidence: clamp(Number(card?.confidence ?? 0.5) || 0.5, 0, 1),
       pinned: Boolean(card?.pinned),
       sourceTurnFrom: nullableString(card?.sourceTurnFrom),
@@ -723,44 +742,49 @@ function normalizeCards(cards) {
       expiresAt: nullableString(card?.expiresAt),
       createdAt: nullableString(card?.createdAt) || nowIso(),
       updatedAt: nullableString(card?.updatedAt) || nowIso(),
-    }
-  })
+    };
+  });
 }
 
-function normalizeCardDeletes(cardIds) {
-  if (!Array.isArray(cardIds)) return []
-  return cardIds.map(nullableString).filter(Boolean)
+function normalizeCardDeletes(cardIds: any) {
+  if (!Array.isArray(cardIds)) return [];
+  return cardIds.map(nullableString).filter(Boolean) as string[];
 }
 
-function normalizeScope(scope) {
-  const value = String(scope || MemoryScopes.SESSION).toLowerCase()
-  if (Object.values(MemoryScopes).includes(value)) return value
-  return MemoryScopes.SESSION
+function normalizeScope(scope: any): string {
+  const value = String(scope || MemoryScopes.SESSION).toLowerCase();
+  if ((Object.values(MemoryScopes) as string[]).includes(value)) return value;
+  return MemoryScopes.SESSION;
 }
 
-function ensureSessionRow(db, sessionKey, agentId, updatedAt = nowIso()) {
+function ensureSessionRow(
+  db: InstanceType<typeof Database>,
+  sessionKey: string,
+  agentId: string | null,
+  updatedAt: string = nowIso(),
+) {
   db.prepare(`
     INSERT INTO memory_sessions (id, session_key, agent_id, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(session_key) DO UPDATE SET
       agent_id = COALESCE(excluded.agent_id, memory_sessions.agent_id),
       updated_at = excluded.updated_at
-  `).run(`session_${randomUUID()}`, sessionKey, agentId, updatedAt, updatedAt)
+  `).run(`session_${randomUUID()}`, sessionKey, agentId, updatedAt, updatedAt);
 }
 
-function normalizeCardType(cardType) {
-  const value = String(cardType || MemoryCardTypes.CONTEXT).toLowerCase()
-  if (Object.values(MemoryCardTypes).includes(value)) return value
-  return MemoryCardTypes.CONTEXT
+function normalizeCardType(cardType: any): string {
+  const value = String(cardType || MemoryCardTypes.CONTEXT).toLowerCase();
+  if ((Object.values(MemoryCardTypes) as string[]).includes(value)) return value;
+  return MemoryCardTypes.CONTEXT;
 }
 
-function nullableString(value) {
-  if (value === undefined || value === null) return null
-  const out = String(value).trim()
-  return out.length > 0 ? out : null
+function nullableString(value: any): string | null {
+  if (value === undefined || value === null) return null;
+  const out = String(value).trim();
+  return out.length > 0 ? out : null;
 }
 
-function mapTurnRow(row) {
+function mapTurnRow(row: any) {
   return {
     id: row.id,
     sessionKey: row.session_key,
@@ -769,10 +793,10 @@ function mapTurnRow(row) {
     content: row.content,
     metadata: safeJsonParse(row.metadata_json, null),
     createdAt: row.created_at,
-  }
+  };
 }
 
-function mapSnapshotRow(row) {
+function mapSnapshotRow(row: any) {
   return {
     id: row.id,
     sessionKey: row.session_key,
@@ -781,10 +805,10 @@ function mapSnapshotRow(row) {
     decisions: safeJsonParse(row.decisions_json, []),
     compactedToTurnId: row.compacted_to_turn_id,
     createdAt: row.created_at,
-  }
+  };
 }
 
-function mapCardRow(row) {
+function mapCardRow(row: any) {
   return {
     id: row.id,
     sessionKey: row.session_key,
@@ -799,16 +823,16 @@ function mapCardRow(row) {
     expiresAt: row.expires_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-  }
+  };
 }
 
-function makeRuntimeContextId(prefix = 'runtime') {
-  const ts = Date.now().toString(36)
-  const rand = randomUUID().slice(0, 8)
-  return `${prefix}_${ts}_${rand}`
+function makeRuntimeContextId(prefix: string = "runtime") {
+  const ts = Date.now().toString(36);
+  const rand = randomUUID().slice(0, 8);
+  return `${prefix}_${ts}_${rand}`;
 }
 
-function isSqliteBusy(err) {
-  const msg = String(err?.message || '')
-  return msg.includes('SQLITE_BUSY') || err?.code === 'SQLITE_BUSY'
+function isSqliteBusy(err: unknown): boolean {
+  const msg = String((err as any)?.message || "");
+  return msg.includes("SQLITE_BUSY") || (err as any)?.code === "SQLITE_BUSY";
 }
