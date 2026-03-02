@@ -13,7 +13,13 @@ set -euo pipefail
 CHANNEL_ID="${1:?Usage: channel-agent.sh <channel_id> <channel_name>}"
 CHANNEL_NAME="${2:-channel-$CHANNEL_ID}"
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+_SCRIPT="${BASH_SOURCE[0]}"
+while [ -L "$_SCRIPT" ]; do
+  _DIR="$(cd "$(dirname "$_SCRIPT")" && pwd)"
+  _SCRIPT="$(readlink "$_SCRIPT")"
+  [[ "$_SCRIPT" != /* ]] && _SCRIPT="$_DIR/$_SCRIPT"
+done
+ROOT_DIR="$(cd "$(dirname "$_SCRIPT")/.." && pwd)"
 source "$ROOT_DIR/scripts/load-env.sh"
 
 # Load worker env vars (same set as start-orchestrator.sh)

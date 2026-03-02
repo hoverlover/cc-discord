@@ -1,7 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+_SCRIPT="${BASH_SOURCE[0]}"
+while [ -L "$_SCRIPT" ]; do
+  _DIR="$(cd "$(dirname "$_SCRIPT")" && pwd)"
+  _SCRIPT="$(readlink "$_SCRIPT")"
+  [[ "$_SCRIPT" != /* ]] && _SCRIPT="$_DIR/$_SCRIPT"
+done
+ROOT_DIR="$(cd "$(dirname "$_SCRIPT")/.." && pwd)"
 source "$ROOT_DIR/scripts/load-env.sh"
 
 WORKER_KEYS=(
