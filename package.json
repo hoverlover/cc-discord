@@ -14,6 +14,7 @@
     "prompts/",
     "memory/",
     ".claude/settings.template.json",
+    ".claude/skills/",
     ".env.example",
     ".env.relay.example",
     ".env.worker.example"
