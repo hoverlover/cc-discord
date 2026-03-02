@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "__ORCHESTRATOR_DIR__/hooks/safe-bash.js"
+            "command": "__ORCHESTRATOR_DIR__/hooks/safe-bash.ts"
           }
         ]
       },
@@ -14,7 +14,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "__ORCHESTRATOR_DIR__/hooks/track-activity.js"
+            "command": "__ORCHESTRATOR_DIR__/hooks/track-activity.ts"
           }
         ]
       }
@@ -24,25 +24,34 @@
         "hooks": [
           {
             "type": "command",
-            "command": "__ORCHESTRATOR_DIR__/hooks/track-activity.js"
+            "command": "__ORCHESTRATOR_DIR__/hooks/track-activity.ts"
           },
           {
             "type": "command",
-            "command": "__ORCHESTRATOR_DIR__/hooks/check-discord-messages.js"
+            "command": "__ORCHESTRATOR_DIR__/hooks/check-discord-messages.ts"
           }
         ]
       }
     ],
     "PostToolUse": [
       {
+        "matcher": "Read",
         "hooks": [
           {
             "type": "command",
-            "command": "__ORCHESTRATOR_DIR__/hooks/track-activity.js"
+            "command": "__ORCHESTRATOR_DIR__/hooks/cleanup-attachment.ts"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__ORCHESTRATOR_DIR__/hooks/track-activity.ts"
           },
           {
             "type": "command",
-            "command": "__ORCHESTRATOR_DIR__/hooks/check-discord-messages.js"
+            "command": "__ORCHESTRATOR_DIR__/hooks/check-discord-messages.ts"
           }
         ]
       }
@@ -52,7 +61,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "__ORCHESTRATOR_DIR__/hooks/check-discord-messages.js"
+            "command": "__ORCHESTRATOR_DIR__/hooks/check-discord-messages.ts"
           }
         ]
       }
@@ -62,11 +71,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "__ORCHESTRATOR_DIR__/hooks/track-activity.js"
+            "command": "__ORCHESTRATOR_DIR__/hooks/track-activity.ts"
           },
           {
             "type": "command",
-            "command": "__ORCHESTRATOR_DIR__/hooks/check-discord-messages.js"
+            "command": "__ORCHESTRATOR_DIR__/hooks/check-discord-messages.ts"
           }
         ]
       }

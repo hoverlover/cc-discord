@@ -1,20 +1,33 @@
 {
-  "name": "cc-discord",
+  "name": "@hoverlover/cc-discord",
   "version": "0.1.0",
-  "private": true,
+  "description": "Discord <-> Claude Code relay: use your Claude subscription to power per-channel AI bots",
   "type": "module",
-  "description": "Quick prototype: Discord <-> Claude Code relay using hook-delivered messages",
+  "bin": {
+    "cc-discord": "./scripts/start.sh"
+  },
   "scripts": {
-    "start": "bash scripts/start-relay.sh",
+    "start": "bash scripts/start.sh",
+    "start:relay": "bash scripts/start-relay.sh",
+    "start:orchestrator": "bash scripts/orchestrator.sh",
+    "start:orchestrator-interactive": "bash scripts/start-orchestrator.sh",
     "dev": "bash scripts/start-relay.sh",
     "generate-settings": "bash scripts/generate-settings.sh",
-    "start:autoreply": "bash scripts/start-claude-autoreply.sh",
-    "start:orchestrator": "bash scripts/start-orchestrator.sh",
-    "memory:smoke": "node tools/memory-smoke.js",
-    "memory:inspect": "node tools/memory-inspect.js"
+    "memory:smoke": "bun tools/memory-smoke.ts",
+    "memory:inspect": "bun tools/memory-inspect.ts",
+    "memory:migrate": "bun scripts/migrate-memory-to-channel-keys.ts",
+    "lint": "bunx biome check .",
+    "lint:fix": "bunx biome check --write .",
+    "format": "bunx biome format --write .",
+    "typecheck": "bunx tsc --noEmit"
   },
   "dependencies": {
     "discord.js": "^14.23.2",
     "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.4",
+    "@types/bun": "^1.3.9",
+    "@types/express": "^5.0.6"
   }
 }

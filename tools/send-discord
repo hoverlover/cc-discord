@@ -1,2 +1,2 @@
 #!/bin/sh
-exec node "$(dirname "$0")/send-discord.js" "$@"
+exec bun "$(dirname "$0")/send-discord.ts" "$@"
