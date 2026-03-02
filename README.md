@@ -37,6 +37,17 @@ bun start
 
 ---
 
+## Create a Discord server
+
+If you don't already have a Discord server to use:
+
+1. Open Discord and click the **+** button in the left sidebar
+2. Choose **Create My Own**, then select a template (or skip)
+3. Name your server and click **Create**
+4. Create one or more text channels where you want the bot to respond
+
+---
+
 ## Create a Discord bot
 
 1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
