@@ -29,6 +29,7 @@ import { SqliteMemoryStore } from "../memory/providers/sqlite/SqliteMemoryStore.
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = process.env.ORCHESTRATOR_DIR || join(__dirname, "..");
+const DATA_DIR = process.env.CC_DISCORD_DATA_DIR || join(process.env.HOME || "", ".cc-discord", "data");
 
 const args = process.argv.slice(2);
 let agentId = process.env.AGENT_ID || process.env.CLAUDE_AGENT_ID || "claude";
@@ -57,7 +58,7 @@ for (let i = 0; i < args.length; i++) {
   }
 }
 
-const dbPath = join(ROOT_DIR, "data", "messages.db");
+const dbPath = join(DATA_DIR, "messages.db");
 // When agent ID is a numeric channel ID (subagent mode), only match that exact ID.
 // Otherwise use the legacy multi-target matching.
 const isChannelAgent = /^\d{15,22}$/.test(agentId);
@@ -166,7 +167,7 @@ process.on("exit", () => {
 });
 
 async function buildMemoryContext(queryText: string): Promise<string> {
-  const memoryDbPath = join(ROOT_DIR, "data", "memory.db");
+  const memoryDbPath = join(DATA_DIR, "memory.db");
   const memorySessionKey = buildMemorySessionKey({ sessionId, agentId, channelId: channelFilter || undefined });
   const runtimeHint = process.env.CLAUDE_RUNTIME_ID || null;
 

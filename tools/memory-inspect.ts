@@ -15,7 +15,8 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = process.env.ORCHESTRATOR_DIR || join(__dirname, "..");
-const dbPath = join(ROOT_DIR, "data", "memory.db");
+const DATA_DIR = process.env.CC_DISCORD_DATA_DIR || join(process.env.HOME || "", ".cc-discord", "data");
+const dbPath = join(DATA_DIR, "memory.db");
 
 const args = process.argv.slice(2);
 let searchTerm: string | null = null;

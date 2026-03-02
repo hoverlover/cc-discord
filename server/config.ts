@@ -8,7 +8,9 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const ROOT_DIR = join(__dirname, "..");
-export const DATA_DIR = join(ROOT_DIR, "data");
+export const DATA_DIR =
+  process.env.CC_DISCORD_DATA_DIR ||
+  join(process.env.HOME || "", ".cc-discord", "data");
 
 // User config directory (~/.config/cc-discord by default, override with CC_DISCORD_CONFIG_DIR)
 const CONFIG_DIR =

@@ -38,14 +38,15 @@ const TRACE_SESSION_ID = process.env.DISCORD_SESSION_ID || process.env.SESSION_I
 const TRACE_AGENT_ID = process.env.AGENT_ID || process.env.CLAUDE_AGENT_ID || "claude";
 const TRACE_CHANNEL_ID = TRACE_AGENT_ID; // In channel routing mode, agent_id IS the channel ID
 const ORCHESTRATOR_DIR = process.env.ORCHESTRATOR_DIR || "";
+const DATA_DIR = process.env.CC_DISCORD_DATA_DIR || join(process.env.HOME || "", ".cc-discord", "data");
 
 let traceDb: InstanceType<typeof DatabaseSync> | null = null;
 
 function getTraceDb(): InstanceType<typeof DatabaseSync> | null {
-  if (!TRACE_ENABLED || !ORCHESTRATOR_DIR) return null;
+  if (!TRACE_ENABLED) return null;
   if (traceDb) return traceDb;
   try {
-    const dbPath = join(ORCHESTRATOR_DIR, "data", "messages.db");
+    const dbPath = join(DATA_DIR, "messages.db");
     traceDb = new DatabaseSync(dbPath);
     traceDb.exec(`
       CREATE TABLE IF NOT EXISTS trace_events (

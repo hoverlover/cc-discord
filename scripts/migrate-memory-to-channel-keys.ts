@@ -19,7 +19,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const dbPath = process.argv[2] || join(__dirname, "..", "data", "memory.db");
+const defaultDataDir = process.env.CC_DISCORD_DATA_DIR || join(process.env.HOME || "", ".cc-discord", "data");
+const dbPath = process.argv[2] || join(defaultDataDir, "memory.db");
 
 console.log(`[migrate] Opening ${dbPath}`);
 const db = new Database(dbPath);

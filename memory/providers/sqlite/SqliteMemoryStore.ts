@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { MemoryStore } from "../../core/MemoryStore.ts";
 import { clamp, MemoryCardTypes, MemoryScopes, nowIso, safeJsonParse, safeJsonStringify } from "../../core/types.ts";
 
-const DEFAULT_DB_PATH = join(process.cwd(), "data", "memory.db");
+const DEFAULT_DB_PATH = join(process.env.CC_DISCORD_DATA_DIR || join(process.env.HOME || "", ".cc-discord", "data"), "memory.db");
 
 const SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS memory_sessions (

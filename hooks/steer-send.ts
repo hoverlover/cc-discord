@@ -16,12 +16,13 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = process.env.ORCHESTRATOR_DIR || join(__dirname, "..");
+const DATA_DIR = process.env.CC_DISCORD_DATA_DIR || join(process.env.HOME || "", ".cc-discord", "data");
 
 const agentId = process.env.AGENT_ID || process.env.CLAUDE_AGENT_ID || "claude";
 const sessionId =
   process.env.DISCORD_SESSION_ID || process.env.BROKER_SESSION_ID || process.env.SESSION_ID || "default";
 
-const dbPath = join(ROOT_DIR, "data", "messages.db");
+const dbPath = join(DATA_DIR, "messages.db");
 
 let hookInput: any;
 try {
