@@ -8,7 +8,6 @@
 
 import {
   ChannelType,
-  PermissionFlagsBits,
   type Client,
   type TextChannel,
   type ThreadChannel,
@@ -29,21 +28,42 @@ import {
 // In-memory cache of channel → thread to avoid DB lookups every flush
 const threadCache = new Map<string, string>();
 
+// Channels that failed with access errors — skip for a cooldown period
+const failedChannels = new Map<string, number>();
+const FAILURE_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+
 let flushTimer: ReturnType<typeof setInterval> | null = null;
 
 // ── Thread lifecycle ────────────────────────────────────────────────
 
+/** Lock a thread if not already locked (idempotent). */
+async function ensureLocked(thread: ThreadChannel): Promise<void> {
+  try {
+    if (!thread.locked) await thread.setLocked(true);
+  } catch {
+    // best-effort — bot may lack MANAGE_THREADS
+  }
+}
+
 /**
- * Find or create the trace thread for a channel. Sets permissions to
- * deny SEND_MESSAGES_IN_THREADS for @everyone so only the bot can post.
+ * Find or create the trace thread for a channel. Locks the thread so
+ * only the bot (with MANAGE_THREADS) can post.
  */
 async function ensureTraceThread(client: Client, channelId: string): Promise<ThreadChannel | null> {
+  // Skip channels that recently failed with access errors
+  const failedAt = failedChannels.get(channelId);
+  if (failedAt && Date.now() - failedAt < FAILURE_COOLDOWN_MS) return null;
+
   // Check in-memory cache first
   const cachedThreadId = threadCache.get(channelId);
   if (cachedThreadId) {
     try {
       const thread = await client.channels.fetch(cachedThreadId);
-      if (thread && thread.isThread()) return thread as ThreadChannel;
+      if (thread && thread.isThread()) {
+        // Ensure thread is locked (idempotent — handles pre-existing unlocked threads)
+        await ensureLocked(thread as ThreadChannel);
+        return thread as ThreadChannel;
+      }
     } catch {
       // Thread was deleted or inaccessible; fall through to re-create
       threadCache.delete(channelId);
@@ -56,6 +76,8 @@ async function ensureTraceThread(client: Client, channelId: string): Promise<Thr
     try {
       const thread = await client.channels.fetch(dbThreadId);
       if (thread && thread.isThread()) {
+        // Ensure thread is locked
+        await ensureLocked(thread as ThreadChannel);
         threadCache.set(channelId, dbThreadId);
         return thread as ThreadChannel;
       }
@@ -76,20 +98,12 @@ async function ensureTraceThread(client: Client, channelId: string): Promise<Thr
       reason: "Live trace thread for agent activity",
     });
 
-    // Lock the thread so only the bot can send messages
+    // Lock the thread so only moderators (i.e. the bot) can send messages.
+    // Note: threads don't support permissionOverwrites — use setLocked() instead.
     try {
-      const guild = textChannel.guild;
-      const botMember = guild.members.me;
-      if (botMember) {
-        await thread.permissionOverwrites.create(guild.roles.everyone, {
-          SendMessagesInThreads: false,
-        });
-        await thread.permissionOverwrites.create(botMember, {
-          SendMessagesInThreads: true,
-        });
-      }
+      await thread.setLocked(true);
     } catch {
-      // Permission overwrites may fail if bot lacks MANAGE_THREADS; continue anyway
+      // May fail if bot lacks MANAGE_THREADS; continue anyway
     }
 
     // Pin an intro message
@@ -202,7 +216,15 @@ async function flushTraceEvents(client: Client) {
         await thread.send(batch);
       }
     } catch (err) {
-      console.error(`[Trace] Failed to post trace events for channel ${channelId}:`, err);
+      const code = (err as any)?.code;
+      if (code === 50001 || code === 50013) {
+        // Missing Access or Missing Permissions — clear cache and back off
+        console.warn(`[Trace] No access to trace thread for channel ${channelId} (${code}) — backing off 5m`);
+        threadCache.delete(channelId);
+        failedChannels.set(channelId, Date.now());
+      } else {
+        console.error(`[Trace] Failed to post trace events for channel ${channelId}:`, err);
+      }
     }
   }
 

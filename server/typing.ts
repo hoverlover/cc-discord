@@ -18,6 +18,18 @@ async function sendTypingOnce(client: any, channelId: string) {
     if (!channel || !channel.isTextBased() || typeof channel.sendTyping !== "function") return;
     await channel.sendTyping();
   } catch (err: unknown) {
+    const code = (err as any)?.code;
+    if (code === 50001 || code === 50013) {
+      // Missing Access or Missing Permissions — stop retrying this channel
+      console.warn(`[Relay] typing indicator stopped for channel ${channelId}: ${(err as Error).message}`);
+      const state = typingSessions.get(channelId);
+      if (state) {
+        clearInterval(state.interval);
+        clearTimeout(state.timeout);
+        typingSessions.delete(channelId);
+      }
+      return;
+    }
     console.warn(`[Relay] typing indicator failed for channel ${channelId}: ${(err as Error).message}`);
   }
 }
