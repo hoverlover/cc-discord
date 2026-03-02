@@ -1,6 +1,6 @@
 # cc-discord
 
-**Discord <-> Claude Code relay** — power per-channel AI bots using your existing Claude subscription (no API key needed).
+**Discord <-> Claude Code relay** — power per-channel AI Agents using your existing Claude subscription (no API key needed).
 
 - One autonomous Claude Code agent per Discord channel
 - Messages stored in SQLite, delivered to agents via hooks
@@ -12,7 +12,7 @@
 ### Prerequisites
 
 - [Bun](https://bun.sh) runtime installed
-- [Claude CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated (`claude auth login`)
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated (`claude auth login`)
 - A Discord bot (see [Create a Discord bot](#create-a-discord-bot) below)
 
 ### Option A: Run directly with bunx (recommended)
@@ -142,18 +142,18 @@ Security note: the worker process intentionally does not receive `DISCORD_BOT_TO
 │  bun start  (scripts/start.sh)                           │
 │                                                          │
 │  ┌──────────────────┐    ┌─────────────────────────────┐ │
-│  │  Relay Server     │    │  Shell Orchestrator          │ │
-│  │  (bun + express)  │    │  (orchestrator.sh)           │ │
-│  │                   │    │                              │ │
-│  │  - Discord bot    │    │  Discovers channels via API  │ │
-│  │  - HTTP API       │    │  Spawns 1 Claude agent per   │ │
-│  │  - SQLite store   │    │  channel, monitors health,   │ │
-│  │  - Typing mgr     │    │  restarts dead/stuck agents  │ │
-│  │  - Trace threads  │    │                              │ │
+│  │  Relay Server    │    │  Shell Orchestrator         │ │
+│  │  (bun + express) │    │  (orchestrator.sh)          │ │
+│  │                  │    │                             │ │
+│  │  - Discord bot   │    │  Discovers channels via API │ │
+│  │  - HTTP API      │    │  Spawns 1 Claude agent per  │ │
+│  │  - SQLite store  │    │  channel, monitors health,  │ │
+│  │  - Typing mgr    │    │  restarts dead/stuck agents │ │
+│  │  - Trace threads │    │                             │ │
 │  └────────┬─────────┘    │  ┌────────┐ ┌────────┐      │ │
-│           │               │  │Agent #1│ │Agent #2│ ...  │ │
-│           │               │  └────────┘ └────────┘      │ │
-│           │               └─────────────────────────────┘ │
+│           │              │  │Agent #1│ │Agent #2│ ...  │ │
+│           │              │  └────────┘ └────────┘      │ │
+│           │              └─────────────────────────────┘ │
 └───────────┼──────────────────────────────────────────────┘
             │
        Discord API
