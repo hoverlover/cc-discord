@@ -470,3 +470,9 @@ Monitor all logs:
 ```bash
 tail -f /tmp/cc-discord/logs/*.log
 ```
+
+---
+
+## License
+
+[MIT](LICENSE)
