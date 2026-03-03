@@ -16,6 +16,21 @@ const textParts: string[] = [];
 
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
+  if (arg === "--help" || arg === "-h") {
+    console.log(`
+Usage: send-discord [--channel <id>] [--reply <messageId>] "message"
+
+Options:
+  --channel  Target channel ID (defaults to AGENT_ID env var)
+  --reply    Message ID to reply to
+
+Examples:
+  send-discord "Build started"
+  send-discord --channel 123456789012345678 "Hello from Claude"
+  send-discord --reply 123456789012345678 "Thanks, on it"
+`);
+    process.exit(0);
+  }
   if (arg === "--channel" && args[i + 1]) {
     channelId = args[++i];
     continue;
@@ -23,6 +38,11 @@ for (let i = 0; i < args.length; i++) {
   if (arg === "--reply" && args[i + 1]) {
     replyTo = args[++i];
     continue;
+  }
+  // Reject unrecognized flags — don't let them become message content
+  if (arg.startsWith("--")) {
+    console.error(`Unknown flag: ${arg}\nUse --help for usage.`);
+    process.exit(1);
   }
   textParts.push(arg);
 }
