@@ -12,7 +12,6 @@
  * - ALLOW_BASH_RUN_IN_BACKGROUND=true|false (default: true)
  * - ALLOW_BASH_BACKGROUND_OPS=true|false (default: false)
  * - BASH_POLICY_NOTIFY_ON_BLOCK=true|false (default: true)
- * - BASH_POLICY_NOTIFY_CHANNEL_ID=<discord-channel-id> (optional)
  *
  * When blocked, script exits 2 (Claude Code hook "block" behavior).
  */
@@ -74,7 +73,7 @@ async function notifyDiscord({ blocked, reasons, command }: { blocked: boolean; 
   const relayPort = process.env.RELAY_PORT || "3199";
   const relayUrl = process.env.RELAY_URL || `http://${relayHost}:${relayPort}`;
   const apiToken = process.env.RELAY_API_TOKEN || "";
-  const channelId = process.env.BASH_POLICY_NOTIFY_CHANNEL_ID || null;
+  const channelId = process.env.AGENT_ID || null;
   const fromAgent = process.env.AGENT_ID || process.env.CLAUDE_AGENT_ID || "bash-guard";
 
   const status = blocked ? "blocked" : "warning";

@@ -37,7 +37,6 @@ WORKER_KEYS=(
   ALLOW_BASH_RUN_IN_BACKGROUND
   ALLOW_BASH_BACKGROUND_OPS
   BASH_POLICY_NOTIFY_ON_BLOCK
-  BASH_POLICY_NOTIFY_CHANNEL_ID
 )
 load_env_keys "$ROOT_DIR/.env.worker" "${WORKER_KEYS[@]}"
 load_env_keys "${CC_DISCORD_CONFIG_DIR:-$HOME/.config/cc-discord}/.env.worker" "${WORKER_KEYS[@]}"
