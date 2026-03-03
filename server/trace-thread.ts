@@ -36,6 +36,15 @@ let flushTimer: ReturnType<typeof setInterval> | null = null;
 
 // ── Thread lifecycle ────────────────────────────────────────────────
 
+/** Unarchive a thread if it's been auto-archived by Discord. */
+async function ensureUnarchived(thread: ThreadChannel): Promise<void> {
+  try {
+    if (thread.archived) await thread.setArchived(false);
+  } catch {
+    // best-effort — bot may lack MANAGE_THREADS
+  }
+}
+
 /** Lock a thread if not already locked (idempotent). */
 async function ensureLocked(thread: ThreadChannel): Promise<void> {
   try {
@@ -60,7 +69,8 @@ async function ensureTraceThread(client: Client, channelId: string): Promise<Thr
     try {
       const thread = await client.channels.fetch(cachedThreadId);
       if (thread && thread.isThread()) {
-        // Ensure thread is locked (idempotent — handles pre-existing unlocked threads)
+        // Unarchive if Discord auto-archived it, then ensure locked
+        await ensureUnarchived(thread as ThreadChannel);
         await ensureLocked(thread as ThreadChannel);
         return thread as ThreadChannel;
       }
@@ -76,7 +86,8 @@ async function ensureTraceThread(client: Client, channelId: string): Promise<Thr
     try {
       const thread = await client.channels.fetch(dbThreadId);
       if (thread && thread.isThread()) {
-        // Ensure thread is locked
+        // Unarchive if Discord auto-archived it, then ensure locked
+        await ensureUnarchived(thread as ThreadChannel);
         await ensureLocked(thread as ThreadChannel);
         threadCache.set(channelId, dbThreadId);
         return thread as ThreadChannel;
@@ -84,6 +95,37 @@ async function ensureTraceThread(client: Client, channelId: string): Promise<Thr
     } catch {
       // Thread was deleted; fall through to create
     }
+  }
+
+  // Search existing threads by name before creating a new one (fallback for
+  // cases where the DB record was lost but the thread still exists in Discord)
+  try {
+    const channel = await client.channels.fetch(channelId);
+    if (channel && channel.type === ChannelType.GuildText) {
+      const textChannel = channel as TextChannel;
+      // Check active threads
+      const activeThreads = await textChannel.threads.fetchActive();
+      const existing = activeThreads.threads.find((t) => t.name === TRACE_THREAD_NAME);
+      if (existing) {
+        await ensureUnarchived(existing);
+        await ensureLocked(existing);
+        setTraceThreadId(channelId, existing.id);
+        threadCache.set(channelId, existing.id);
+        return existing;
+      }
+      // Check archived threads
+      const archivedThreads = await textChannel.threads.fetchArchived({ limit: 10 });
+      const existingArchived = archivedThreads.threads.find((t) => t.name === TRACE_THREAD_NAME);
+      if (existingArchived) {
+        await ensureUnarchived(existingArchived);
+        await ensureLocked(existingArchived);
+        setTraceThreadId(channelId, existingArchived.id);
+        threadCache.set(channelId, existingArchived.id);
+        return existingArchived;
+      }
+    }
+  } catch {
+    // best effort — fall through to create
   }
 
   // Create new thread
