@@ -43,6 +43,9 @@ const toolInput = input.tool_input || input.toolInput || null;
 let db: InstanceType<typeof DatabaseSync>;
 try {
   db = new DatabaseSync(dbPath);
+  // WAL mode for better concurrency with the relay server's flush loop
+  db.exec("PRAGMA journal_mode = WAL;");
+  db.exec("PRAGMA busy_timeout = 5000;");
 } catch {
   process.exit(0);
 }
@@ -107,7 +110,9 @@ try {
           INSERT INTO trace_events (session_id, agent_id, channel_id, event_type, tool_name, summary)
           VALUES (?, ?, ?, 'tool_start', ?, ?)
         `).run(sessionId, agentId, traceChannelId, toolName || "tool", summary);
-      } catch { /* fail-open */ }
+      } catch {
+        /* fail-open */
+      }
     }
 
     process.exit(0);
@@ -118,17 +123,21 @@ try {
     let elapsedTag = "";
     if (traceEnabled && hookEvent === "PostToolUse") {
       try {
-        const row = db.prepare(`
+        const row = db
+          .prepare(`
           SELECT started_at FROM agent_activity
           WHERE session_id = ? AND agent_id = ?
-        `).get(sessionId, agentId) as { started_at?: string } | undefined;
+        `)
+          .get(sessionId, agentId) as { started_at?: string } | undefined;
         if (row?.started_at) {
           const elapsedMs = Date.now() - new Date(row.started_at).getTime();
           if (elapsedMs >= 0 && elapsedMs < 600_000) {
             elapsedTag = `elapsed:${elapsedMs}|`;
           }
         }
-      } catch { /* best-effort */ }
+      } catch {
+        /* best-effort */
+      }
     }
 
     db.prepare(`
@@ -157,7 +166,9 @@ try {
           INSERT INTO trace_events (session_id, agent_id, channel_id, event_type, tool_name, summary)
           VALUES (?, ?, ?, 'tool_end', ?, ?)
         `).run(sessionId, agentId, traceChannelId, toolName || "tool", `${elapsedTag}${summary}`);
-      } catch { /* fail-open */ }
+      } catch {
+        /* fail-open */
+      }
     }
   }
 } catch {

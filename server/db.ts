@@ -11,6 +11,11 @@ mkdirSync(DATA_DIR, { recursive: true });
 
 export const db = new DatabaseSync(join(DATA_DIR, "messages.db"));
 
+// Enable WAL mode for better concurrent access between relay server and hook processes.
+// WAL allows readers and writers to operate concurrently without SQLITE_BUSY errors.
+db.exec("PRAGMA journal_mode = WAL;");
+db.exec("PRAGMA busy_timeout = 5000;");
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -170,14 +175,29 @@ export function getPendingTraceEvents(limit: number = 50): TraceEvent[] {
   }
 }
 
-export function markTraceEventsPosted(ids: number[]) {
-  if (!ids.length) return;
-  try {
-    const placeholders = ids.map(() => "?").join(",");
-    db.prepare(`UPDATE trace_events SET posted = 1 WHERE id IN (${placeholders})`).run(...ids);
-  } catch {
-    // fail-open
+export function markTraceEventsPosted(ids: number[]): boolean {
+  if (!ids.length) return true;
+  // Retry up to 3 times to handle SQLITE_BUSY from concurrent hook writes
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const placeholders = ids.map(() => "?").join(",");
+      db.prepare(`UPDATE trace_events SET posted = 1 WHERE id IN (${placeholders})`).run(...ids);
+      return true;
+    } catch (err) {
+      const code = (err as any)?.code;
+      if (code === "SQLITE_BUSY" && attempt < 2) {
+        // Brief sync delay before retry (Bun doesn't have Atomics.wait, use a spin)
+        const end = Date.now() + 50 * (attempt + 1);
+        while (Date.now() < end) {
+          /* spin wait */
+        }
+        continue;
+      }
+      console.error(`[Trace] markTraceEventsPosted failed (attempt ${attempt + 1}/3, ${ids.length} ids):`, err);
+      return false;
+    }
   }
+  return false;
 }
 
 export function insertTraceEvent(

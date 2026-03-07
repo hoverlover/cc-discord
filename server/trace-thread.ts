@@ -6,17 +6,8 @@
  *   hooks write → trace_events table → flush loop reads → batches → posts to thread
  */
 
-import {
-  ChannelType,
-  type Client,
-  type TextChannel,
-  type ThreadChannel,
-} from "discord.js";
-import {
-  TRACE_FLUSH_INTERVAL_MS,
-  TRACE_THREAD_ENABLED,
-  TRACE_THREAD_NAME,
-} from "./config.ts";
+import { ChannelType, type Client, type TextChannel, type ThreadChannel } from "discord.js";
+import { TRACE_FLUSH_INTERVAL_MS, TRACE_THREAD_ENABLED, TRACE_THREAD_NAME } from "./config.ts";
 import {
   getPendingTraceEvents,
   getTraceThreadId,
@@ -241,7 +232,7 @@ function formatTimestamp(iso: string): string {
 /** Clean up text for display — convert literal \n to real newlines, preserve full content. */
 function cleanWhitespace(text: string): string {
   return String(text || "")
-    .replace(/\\n/g, "\n")   // convert literal \n to real newlines
+    .replace(/\\n/g, "\n") // convert literal \n to real newlines
     .replace(/[ \t]+/g, " ") // collapse horizontal whitespace (but keep newlines)
     .trim();
 }
@@ -284,14 +275,25 @@ async function flushTraceEvents(client: Client) {
       return true;
     });
 
-    // Even if filtered out, mark all as posted
-    postedIds.push(...channelEvents.map((e) => e.id));
-
-    if (!meaningful.length) continue;
+    // If all events were filtered out, mark them as posted immediately
+    if (!meaningful.length) {
+      postedIds.push(...channelEvents.map((e) => e.id));
+      continue;
+    }
 
     try {
       const thread = await ensureTraceThread(client, channelId);
-      if (!thread) continue;
+      if (!thread) {
+        // Can't get thread (cooldown or missing channel) — DON'T mark as posted
+        // so they'll be retried after cooldown expires. To prevent infinite
+        // growth, mark them posted if they're older than the cooldown period.
+        const now = Date.now();
+        for (const e of channelEvents) {
+          const age = now - new Date(e.created_at).getTime();
+          if (age > FAILURE_COOLDOWN_MS) postedIds.push(e.id);
+        }
+        continue;
+      }
 
       // Batch into a single message (Discord max 2000 chars)
       const lines = meaningful.map(formatTraceEvent);
@@ -300,6 +302,9 @@ async function flushTraceEvents(client: Client) {
       for (const batch of batches) {
         await thread.send(batch);
       }
+
+      // Only mark as posted AFTER successful Discord send
+      postedIds.push(...channelEvents.map((e) => e.id));
     } catch (err) {
       const code = (err as any)?.code;
       if (code === 50001 || code === 50013) {
@@ -307,13 +312,23 @@ async function flushTraceEvents(client: Client) {
         console.warn(`[Trace] No access to trace thread for channel ${channelId} (${code}) — backing off 5m`);
         threadCache.delete(channelId);
         failedChannels.set(channelId, Date.now());
+        // Mark as posted to avoid infinite retry on permanent access errors
+        postedIds.push(...channelEvents.map((e) => e.id));
       } else {
         console.error(`[Trace] Failed to post trace events for channel ${channelId}:`, err);
+        // Don't mark as posted — they'll be retried on next flush
       }
     }
   }
 
-  markTraceEventsPosted(postedIds);
+  if (postedIds.length > 0) {
+    const success = markTraceEventsPosted(postedIds);
+    if (!success) {
+      console.error(
+        `[Trace] CRITICAL: Failed to mark ${postedIds.length} events as posted — duplicates likely on next flush`,
+      );
+    }
+  }
 }
 
 /** Split lines into batches that fit within maxLen characters.
