@@ -71,41 +71,86 @@ async function syncRuntimeContext({ hookEvent, hookInput }: { hookEvent: string;
   }
 }
 
+/**
+ * Build memory context using QMD semantic search.
+ *
+ * Queries the `agent-memory` QMD collection and formats results into the
+ * same MEMORY CONTEXT format the downstream prompts expect.
+ */
 async function buildMemoryContext({ queryText, runtimeState }: { queryText: string; runtimeState: any }) {
-  const memoryDbPath = join(DATA_DIR, "memory.db");
-  const memorySessionKey = buildMemorySessionKey({ sessionId, agentId });
+  if (!queryText?.trim()) return "";
 
-  let store: SqliteMemoryStore | undefined;
   try {
-    store = new SqliteMemoryStore({ dbPath: memoryDbPath, logger: noopLogger });
-    const coordinator = new MemoryCoordinator({ store, logger: noopLogger });
-    await coordinator.init();
+    const { execSync } = await import("node:child_process");
 
-    const packet = await coordinator.assembleContext({
-      sessionKey: memorySessionKey,
-      queryText,
-      runtimeContextId: runtimeState?.runtimeContextId || null,
-      runtimeEpoch: runtimeState?.runtimeEpoch || null,
-      includeSnapshot: true,
-      avoidCurrentRuntime: true,
-      activeWindowSize: 12,
-      maxCards: 6,
-      maxRecallTurns: 8,
-      maxTurnScan: 300,
-    });
+    // Use `qmd search` (BM25) for fast keyword recall (~0.3s).
+    // `qmd query` would give LLM-reranked results but is too slow for a hook.
+    // -n 8 returns up to 8 relevant chunks.
+    // --min-score 0.3 filters low-relevance noise.
+    const raw = execSync(
+      `qmd search ${JSON.stringify(queryText)} -n 8 --min-score 0.3 --json 2>/dev/null`,
+      { encoding: "utf-8", timeout: 8_000 },
+    );
 
-    return coordinator.formatContextPacket(packet);
-  } catch {
-    return "";
-  } finally {
-    if (store) {
+    const results: Array<{ docid: string; score: number; file: string; title: string; snippet: string }> =
+      JSON.parse(raw || "[]");
+
+    if (results.length === 0) return "";
+
+    // Expand the top results into readable turn snippets using `qmd get`.
+    // Each snippet in the JSON output has a line reference — we use `qmd get`
+    // to retrieve a fuller window of surrounding content.
+    const lines: string[] = [];
+    for (const result of results.slice(0, 8)) {
+      // Extract the path + line from the qmd:// URI
+      const qmdPath = result.file.replace(/^qmd:\/\//, "");
+      const lineMatch = result.snippet.match(/@@ -(\d+)/);
+      const lineNum = lineMatch ? parseInt(lineMatch[1], 10) : 1;
+
       try {
-        await store.close();
+        const content = execSync(
+          `qmd get "${qmdPath}:${lineNum}" -l 12 2>/dev/null`,
+          { encoding: "utf-8", timeout: 5_000 },
+        ).trim();
+
+        if (content) {
+          // Clean up markdown headers/frontmatter noise, keep the conversation content
+          const cleaned = content
+            .split("\n")
+            .filter((l: string) => !l.startsWith("---") && !l.startsWith("session_key:") && !l.startsWith("agent_id:"))
+            .join("\n")
+            .trim();
+
+          if (cleaned) {
+            const scoreLabel = `${Math.round(result.score * 100)}%`;
+            lines.push(`- [${scoreLabel}] ${truncateForMemory(cleaned, 320)}`);
+          }
+        }
       } catch {
-        /* ignore */
+        // Fall back to the snippet from the JSON
+        if (result.snippet) {
+          const snippetText = result.snippet
+            .replace(/@@ -\d+,?\d* @@.*\n?/, "")
+            .replace(/\(.*?before.*?after\)\n?/, "")
+            .trim();
+          if (snippetText) {
+            lines.push(`- [${Math.round(result.score * 100)}%] ${truncateForMemory(snippetText, 320)}`);
+          }
+        }
       }
     }
+
+    if (lines.length === 0) return "";
+    return `MEMORY CONTEXT:\nRelevant prior turns (semantic recall via QMD):\n${lines.join("\n")}`;
+  } catch {
+    return "";
   }
+}
+
+function truncateForMemory(text: string, maxLen: number): string {
+  const oneLine = text.replace(/\n/g, " ").replace(/\s+/g, " ").trim();
+  if (oneLine.length <= maxLen) return oneLine;
+  return `${oneLine.slice(0, maxLen - 1)}…`;
 }
 
 let hookInput: any;
