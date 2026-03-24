@@ -40,12 +40,7 @@ setInterval(cleanupOldAttachments, 10 * 60 * 1000);
 cleanupOldAttachments();
 
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMessageThreads,
-  ],
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
 });
 
 function requireAuth(req: Request, res: Response): boolean {
