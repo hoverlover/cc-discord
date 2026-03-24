@@ -54,6 +54,18 @@ async function ensureTraceThread(client: Client, channelId: string): Promise<Thr
   const failedAt = failedChannels.get(channelId);
   if (failedAt && Date.now() - failedAt < FAILURE_COOLDOWN_MS) return null;
 
+  // Quick-fetch to detect threads: can't create trace threads inside threads
+  try {
+    const ch = await client.channels.fetch(channelId);
+    if (ch?.isThread()) {
+      failedChannels.set(channelId, Date.now());
+      return null;
+    }
+  } catch {
+    // Channel doesn't exist or inaccessible — fall through to cached/DB path
+    // which will also fail and trigger cooldown
+  }
+
   // Check in-memory cache first
   const cachedThreadId = threadCache.get(channelId);
   if (cachedThreadId) {
@@ -156,7 +168,13 @@ async function ensureTraceThread(client: Client, channelId: string): Promise<Thr
     threadCache.set(channelId, thread.id);
     return thread;
   } catch (err) {
-    console.error(`[Trace] Failed to create trace thread for channel ${channelId}:`, err);
+    const code = (err as any)?.code;
+    if (code === 10003 || code === 50001 || code === 50013) {
+      console.warn(`[Trace] Cannot create trace thread for channel ${channelId} (${code}) — backing off 5m`);
+      failedChannels.set(channelId, Date.now());
+    } else {
+      console.error(`[Trace] Failed to create trace thread for channel ${channelId}:`, err);
+    }
     return null;
   }
 }
@@ -313,9 +331,9 @@ async function flushTraceEvents(client: Client) {
       postedIds.push(...channelEvents.map((e) => e.id));
     } catch (err) {
       const code = (err as any)?.code;
-      if (code === 50001 || code === 50013) {
-        // Missing Access or Missing Permissions — clear cache and back off
-        console.warn(`[Trace] No access to trace thread for channel ${channelId} (${code}) — backing off 5m`);
+      if (code === 50001 || code === 50013 || code === 10003) {
+        // Missing Access, Missing Permissions, or Unknown Channel — clear cache and back off
+        console.warn(`[Trace] Cannot access trace thread for channel ${channelId} (${code}) — backing off 5m`);
         threadCache.delete(channelId);
         failedChannels.set(channelId, Date.now());
         // Mark as posted to avoid infinite retry on permanent access errors
