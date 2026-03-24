@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } from "discord.js";
+import { Client, GatewayIntentBits, MessageType, REST, Routes, SlashCommandBuilder } from "discord.js";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { cleanupOldAttachments } from "./attachment.ts";
 import { maybeNotifyBusyQueued } from "./busy-notify.ts";
@@ -105,6 +105,7 @@ client.once("clientReady", async () => {
 client.on("messageCreate", async (message) => {
   if (!message) return;
   if (message.author?.bot) return;
+  if (message.type === MessageType.ThreadCreated || message.type === MessageType.ThreadStarterMessage) return;
   if (!isAllowedChannelForMessage(message)) return;
   if (message.channel?.isThread?.() && isTraceThread(message.channelId)) return;
   if (!isAllowedUser(message.author?.id)) {
