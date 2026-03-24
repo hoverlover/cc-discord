@@ -253,6 +253,11 @@ async function flushTraceEvents(client: Client) {
   const byChannel = new Map<string, TraceEvent[]>();
   for (const evt of events) {
     const ch = evt.channel_id || "unknown";
+    // Skip non-snowflake channel IDs (e.g. "claude" from legacy agent routing)
+    if (ch !== "unknown" && !/^\d{15,22}$/.test(ch)) {
+      postedIds.push(evt.id);
+      continue;
+    }
     const arr = byChannel.get(ch) || [];
     arr.push(evt);
     byChannel.set(ch, arr);
