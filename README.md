@@ -173,10 +173,10 @@ Security note: the worker process intentionally does not receive `DISCORD_BOT_TO
 │  │  Relay Server    │    │  Shell Orchestrator         │ │
 │  │  (bun + express) │    │  (orchestrator.sh)          │ │
 │  │                  │    │                             │ │
-│  │  - Discord bot   │    │  Discovers channels & threads│ │
+│  │  - Discord bot   │    │  Discovers channels/threads │ │
 │  │  - HTTP API      │    │  Spawns 1 Claude agent per  │ │
-│  │  - SQLite store  │    │  channel/thread, monitors   │ │
-│  │  - Typing mgr    │    │  health, restarts stuck ones│ │
+│  │  - SQLite store  │    │  channel or thread, monitors│ │
+│  │  - Typing mgr    │    │  health, restarts if stuck  │ │
 │  │  - Trace threads │    │                             │ │
 │  └────────┬─────────┘    │  ┌────────┐ ┌────────┐      │ │
 │           │              │  │Agent #1│ │Agent #2│ ...  │ │
