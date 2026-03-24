@@ -251,11 +251,12 @@ async function flushTraceEvents(client: Client) {
 
   // Group by channel
   const byChannel = new Map<string, TraceEvent[]>();
+  const skippedIds: number[] = [];
   for (const evt of events) {
     const ch = evt.channel_id || "unknown";
     // Skip non-snowflake channel IDs (e.g. "claude" from legacy agent routing)
     if (ch !== "unknown" && !/^\d{15,22}$/.test(ch)) {
-      postedIds.push(evt.id);
+      skippedIds.push(evt.id);
       continue;
     }
     const arr = byChannel.get(ch) || [];
@@ -263,7 +264,7 @@ async function flushTraceEvents(client: Client) {
     byChannel.set(ch, arr);
   }
 
-  const postedIds: number[] = [];
+  const postedIds: number[] = [...skippedIds];
 
   for (const [channelId, channelEvents] of byChannel) {
     if (channelId === "unknown") {
