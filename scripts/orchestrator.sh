@@ -299,33 +299,84 @@ done < <(discover_channels_lines)
 
 log "Initial spawn complete (${#KNOWN_CHANNEL_IDS[@]} channels). Entering health check loop."
 
-# Health check loop
+# Check for unread messages with no active agent (e.g. new threads).
+# Spawns agents immediately so users don't wait for the next health check.
+UNSERVICED_CHECK_INTERVAL="${UNSERVICED_CHECK_INTERVAL:-5}"
+
+check_unserviced() {
+  local response
+  response=$(curl -s --max-time 5 \
+    -H "x-api-token: ${RELAY_API_TOKEN}" \
+    "${RELAY_URL}/api/unserviced" 2>/dev/null) || return
+
+  local targets
+  targets=$(echo "$response" | bun -e "
+    const input = await Bun.stdin.text();
+    try {
+      const data = JSON.parse(input);
+      if (data.success && Array.isArray(data.targets)) {
+        for (const t of data.targets) {
+          // Only spawn for snowflake IDs (channels/threads), not agent names
+          if (/^\d{15,22}$/.test(t.toAgent)) {
+            console.log(t.toAgent);
+          }
+        }
+      }
+    } catch {}
+  " 2>/dev/null) || return
+
+  [ -z "$targets" ] && return
+
+  while IFS= read -r target_id; do
+    [ -z "$target_id" ] && continue
+    _idx=$(find_channel_index "$target_id")
+    if [ "$_idx" -ge 0 ]; then
+      # Agent exists but hasn't polled yet — skip
+      continue
+    fi
+    log "Unserviced messages for ${target_id} — spawning agent"
+    start_channel_agent "$target_id" "thread-${target_id}"
+  done <<< "$targets"
+}
+
+# Health check loop — runs unserviced check every UNSERVICED_CHECK_INTERVAL seconds,
+# full health check every HEALTH_CHECK_INTERVAL seconds.
+SECONDS_SINCE_HEALTH=0
 while true; do
-  sleep "$HEALTH_CHECK_INTERVAL"
+  sleep "$UNSERVICED_CHECK_INTERVAL"
+  SECONDS_SINCE_HEALTH=$((SECONDS_SINCE_HEALTH + UNSERVICED_CHECK_INTERVAL))
 
-  # Check for dead agents and restart them
-  for i in "${!KNOWN_CHANNEL_IDS[@]}"; do
-    _pid="${KNOWN_CHANNEL_PIDS[$i]}"
-    if ! is_agent_alive "$_pid"; then
-      _name="${KNOWN_CHANNEL_NAMES[$i]}"
-      _cid="${KNOWN_CHANNEL_IDS[$i]}"
-      wait "$_pid" 2>/dev/null || true
-      log "Agent #${_name} (${_cid}) exited. Restarting in ${AGENT_RESTART_DELAY}s..."
-      sleep "$AGENT_RESTART_DELAY"
-      start_channel_agent "$_cid" "$_name"
-    fi
-  done
+  # Fast check: spawn agents for unserviced threads/channels
+  check_unserviced
 
-  # Check for stuck agents (alive but not polling)
-  check_stuck_agents
+  # Full health check on the slower interval
+  if [ "$SECONDS_SINCE_HEALTH" -ge "$HEALTH_CHECK_INTERVAL" ]; then
+    SECONDS_SINCE_HEALTH=0
 
-  # Check for new channels
-  while IFS=' ' read -r channel_id channel_name; do
-    [ -z "$channel_id" ] && continue
-    _idx=$(find_channel_index "$channel_id")
-    if [ "$_idx" -lt 0 ]; then
-      log "New channel discovered: #${channel_name} (${channel_id})"
-      start_channel_agent "$channel_id" "$channel_name"
-    fi
-  done < <(discover_channels_lines)
+    # Check for dead agents and restart them
+    for i in "${!KNOWN_CHANNEL_IDS[@]}"; do
+      _pid="${KNOWN_CHANNEL_PIDS[$i]}"
+      if ! is_agent_alive "$_pid"; then
+        _name="${KNOWN_CHANNEL_NAMES[$i]}"
+        _cid="${KNOWN_CHANNEL_IDS[$i]}"
+        wait "$_pid" 2>/dev/null || true
+        log "Agent #${_name} (${_cid}) exited. Restarting in ${AGENT_RESTART_DELAY}s..."
+        sleep "$AGENT_RESTART_DELAY"
+        start_channel_agent "$_cid" "$_name"
+      fi
+    done
+
+    # Check for stuck agents (alive but not polling)
+    check_stuck_agents
+
+    # Check for new channels/threads
+    while IFS=' ' read -r channel_id channel_name; do
+      [ -z "$channel_id" ] && continue
+      _idx=$(find_channel_index "$channel_id")
+      if [ "$_idx" -lt 0 ]; then
+        log "New channel discovered: #${channel_name} (${channel_id})"
+        start_channel_agent "$channel_id" "$channel_name"
+      fi
+    done < <(discover_channels_lines)
+  fi
 done

@@ -228,6 +228,28 @@ export function insertTraceEvent(
 }
 
 /**
+ * Find message targets (to_agent) that have unread messages but no agent
+ * has ever polled for them (no agent_activity record). These are typically
+ * new threads that need an agent spawned.
+ */
+export function getUnservicedTargets(sessionId: string): { toAgent: string; unreadCount: number; oldestAt: string }[] {
+  try {
+    const rows = db
+      .prepare(`
+      SELECT m.to_agent, COUNT(*) as unread_count, MIN(m.created_at) as oldest_at
+      FROM messages m
+      LEFT JOIN agent_activity a ON a.agent_id = m.to_agent AND a.session_id = m.session_id
+      WHERE m.session_id = ? AND m.read = 0 AND a.agent_id IS NULL
+      GROUP BY m.to_agent
+    `)
+      .all(sessionId) as any[];
+    return rows.map((r) => ({ toAgent: r.to_agent, unreadCount: r.unread_count, oldestAt: r.oldest_at }));
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Get health status for all agents in a session.
  * Returns each agent's last heartbeat time, status, and whether it
  * has unread messages waiting (a sign it might be stuck).

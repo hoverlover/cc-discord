@@ -27,7 +27,7 @@ import {
   TYPING_MAX_MS,
   validateConfig,
 } from "./config.ts";
-import { clearChannelModel, db, getAgentHealthAll, getChannelModel, isTraceThread, setChannelModel } from "./db.ts";
+import { clearChannelModel, db, getAgentHealthAll, getChannelModel, getUnservicedTargets, isTraceThread, setChannelModel } from "./db.ts";
 import { memoryStore } from "./memory.ts";
 import { persistInboundDiscordMessage, persistOutboundDiscordMessage } from "./messages.ts";
 import { startTraceFlushLoop, stopTraceFlushLoop } from "./trace-thread.ts";
@@ -249,6 +249,17 @@ app.get("/api/agent-health", (req: Request, res: Response) => {
     });
   } catch (err: unknown) {
     console.error("[Relay] /api/agent-health failed:", err);
+    res.status(500).json({ success: false, error: (err as Error).message });
+  }
+});
+
+app.get("/api/unserviced", (req: Request, res: Response) => {
+  try {
+    if (!requireAuth(req, res)) return;
+    const targets = getUnservicedTargets(DISCORD_SESSION_ID);
+    res.json({ success: true, targets });
+  } catch (err: unknown) {
+    console.error("[Relay] /api/unserviced failed:", err);
     res.status(500).json({ success: false, error: (err as Error).message });
   }
 });
