@@ -2,7 +2,7 @@
 
 **Discord <-> Claude Code relay** — power per-channel AI Agents using your existing Claude subscription (no API key needed).
 
-- One autonomous Claude Code agent per Discord channel
+- One autonomous Claude Code agent per Discord channel — plus per-thread agents for threaded conversations
 - Messages stored in SQLite, delivered to agents via hooks
 - Replies sent back to Discord via `send-discord` tool
 - Automatic catch-up of missed messages on startup — no messages lost during restarts
@@ -153,7 +153,8 @@ These are read by the orchestrator shell script:
 
 | Variable | Default | Description |
 |---|---|---|
-| `HEALTH_CHECK_INTERVAL` | `30` | Seconds between health checks |
+| `HEALTH_CHECK_INTERVAL` | `30` | Seconds between full health checks |
+| `UNSERVICED_CHECK_INTERVAL` | `5` | Seconds between checks for new threads/channels needing agents |
 | `AGENT_RESTART_DELAY` | `5` | Seconds to wait before restarting a dead agent |
 | `CC_DISCORD_CONFIG_DIR` | `~/.config/cc-discord` | Directory for user config env files |
 | `CC_DISCORD_LOG_DIR` | `/tmp/cc-discord/logs` | Directory for all log files |
@@ -172,10 +173,10 @@ Security note: the worker process intentionally does not receive `DISCORD_BOT_TO
 │  │  Relay Server    │    │  Shell Orchestrator         │ │
 │  │  (bun + express) │    │  (orchestrator.sh)          │ │
 │  │                  │    │                             │ │
-│  │  - Discord bot   │    │  Discovers channels via API │ │
+│  │  - Discord bot   │    │  Discovers channels & threads│ │
 │  │  - HTTP API      │    │  Spawns 1 Claude agent per  │ │
-│  │  - SQLite store  │    │  channel, monitors health,  │ │
-│  │  - Typing mgr    │    │  restarts dead/stuck agents │ │
+│  │  - SQLite store  │    │  channel/thread, monitors   │ │
+│  │  - Typing mgr    │    │  health, restarts stuck ones│ │
 │  │  - Trace threads │    │                             │ │
 │  └────────┬─────────┘    │  ┌────────┐ ┌────────┐      │ │
 │           │              │  │Agent #1│ │Agent #2│ ...  │ │
@@ -199,9 +200,21 @@ Security note: the worker process intentionally does not receive `DISCORD_BOT_TO
 
 ## Features
 
+### Thread support
+
+Threads in allowed channels are automatically supported — no configuration needed. When a user posts in a thread, the relay detects it, and the orchestrator spawns a dedicated agent for that thread within seconds. Each thread gets its own independent conversation context, separate from the parent channel.
+
+- **Automatic discovery:** The orchestrator polls for unserviced messages every 5s (`UNSERVICED_CHECK_INTERVAL`), so new threads get an agent almost immediately
+- **Thread context in messages:** Agents see thread messages tagged with the thread name (e.g. `user [thread: Bug Discussion]: message text`), so they know they're in a thread
+- **Catch-up:** Active threads are included in the startup catch-up alongside channels
+- **Typing & replies:** Typing indicators and replies work inside threads just like in channels
+- **Trace thread exclusion:** Bot-managed trace threads are never treated as user conversation threads
+
+Threads in allowed channels are permitted automatically — you don't need to add thread IDs to `DISCORD_ALLOWED_CHANNEL_IDS`.
+
 ### Message catch-up
 
-When the relay starts, it fetches recent message history from each allowed channel and persists any messages that arrived while it was offline. Duplicates are silently ignored. This ensures no messages are lost during restarts or outages. Controlled by `CATCHUP_MESSAGE_LIMIT` (default 100, set to `0` to disable).
+When the relay starts, it fetches recent message history from each allowed channel (and their active threads) and persists any messages that arrived while it was offline. Duplicates are silently ignored. This ensures no messages are lost during restarts or outages. Controlled by `CATCHUP_MESSAGE_LIMIT` (default 100, set to `0` to disable).
 
 ### Typing indicators
 
