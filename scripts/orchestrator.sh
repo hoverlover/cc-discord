@@ -97,7 +97,7 @@ discover_channels_lines() {
   local response
   response=$(curl -s --max-time 10 \
     -H "x-api-token: ${RELAY_API_TOKEN}" \
-    "${RELAY_URL}/api/channels" 2>/dev/null) || {
+    "${RELAY_URL}/api/channels?include_threads=true" 2>/dev/null) || {
     log "WARNING: Failed to reach relay at ${RELAY_URL}"
     return
   }
