@@ -94,6 +94,24 @@ export function isAllowedChannel(channelId: string): boolean {
   return true;
 }
 
+/**
+ * Thread-aware channel check for incoming messages.
+ * Allows threads whose parent channel is in the allowlist.
+ */
+export function isAllowedChannelForMessage(message: { channelId: string; channel?: any }): boolean {
+  if (!message.channelId) return false;
+  if (IGNORED_CHANNEL_IDS.has(message.channelId)) return false;
+  if (ALLOWED_CHANNEL_IDS.length === 0) return true;
+  if (ALLOWED_CHANNEL_IDS.includes(message.channelId)) return true;
+  // Thread: check parent channel
+  const ch = message.channel;
+  if (ch?.isThread?.() && ch.parentId) {
+    if (IGNORED_CHANNEL_IDS.has(ch.parentId)) return false;
+    return ALLOWED_CHANNEL_IDS.includes(ch.parentId);
+  }
+  return false;
+}
+
 export function isAllowedUser(userId: string | undefined): boolean {
   if (!userId) return false;
   if (ALLOWED_DISCORD_USER_IDS.length === 0) return true;

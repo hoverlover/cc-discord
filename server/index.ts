@@ -15,6 +15,7 @@ import {
   DISCORD_SESSION_ID,
   IGNORED_CHANNEL_IDS,
   isAllowedChannel,
+  isAllowedChannelForMessage,
   isAllowedUser,
   MESSAGE_ROUTING_MODE,
   RELAY_ALLOW_NO_AUTH,
@@ -26,7 +27,7 @@ import {
   TYPING_MAX_MS,
   validateConfig,
 } from "./config.ts";
-import { clearChannelModel, db, getAgentHealthAll, getChannelModel, setChannelModel } from "./db.ts";
+import { clearChannelModel, db, getAgentHealthAll, getChannelModel, isTraceThread, setChannelModel } from "./db.ts";
 import { memoryStore } from "./memory.ts";
 import { persistInboundDiscordMessage, persistOutboundDiscordMessage } from "./messages.ts";
 import { startTraceFlushLoop, stopTraceFlushLoop } from "./trace-thread.ts";
@@ -39,7 +40,12 @@ setInterval(cleanupOldAttachments, 10 * 60 * 1000);
 cleanupOldAttachments();
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMessageThreads,
+  ],
 });
 
 function requireAuth(req: Request, res: Response): boolean {
@@ -104,7 +110,8 @@ client.once("clientReady", async () => {
 client.on("messageCreate", async (message) => {
   if (!message) return;
   if (message.author?.bot) return;
-  if (!isAllowedChannel(message.channelId)) return;
+  if (!isAllowedChannelForMessage(message)) return;
+  if (message.channel?.isThread?.() && isTraceThread(message.channelId)) return;
   if (!isAllowedUser(message.author?.id)) {
     console.log(`[Relay] Ignoring message from unauthorized user ${message.author?.id}`);
     return;
@@ -193,6 +200,34 @@ app.get("/api/channels", async (req: Request, res: Response) => {
           type: channel.type,
           model: getChannelModel(channel.id),
         });
+      }
+    }
+
+    // Optionally include active threads in allowed channels
+    if (req.query.include_threads === "true") {
+      for (const ch of [...channels]) {
+        try {
+          const parentChannel = await client.channels.fetch(ch.id);
+          if (parentChannel && "threads" in parentChannel) {
+            const activeThreads = await (parentChannel as any).threads.fetchActive();
+            for (const [, thread] of activeThreads.threads) {
+              if (isTraceThread(thread.id)) continue;
+              channels.push({
+                id: thread.id,
+                name: thread.name,
+                guildId: ch.guildId,
+                guildName: ch.guildName,
+                type: thread.type,
+                isThread: true,
+                parentChannelId: ch.id,
+                parentChannelName: ch.name,
+                model: getChannelModel(thread.id),
+              });
+            }
+          }
+        } catch {
+          /* skip */
+        }
       }
     }
 

@@ -4,7 +4,8 @@
  */
 
 import type { Client } from "discord.js";
-import { CATCHUP_MESSAGE_LIMIT, IGNORED_CHANNEL_IDS, ALLOWED_CHANNEL_IDS, isAllowedUser } from "./config.ts";
+import { CATCHUP_MESSAGE_LIMIT, IGNORED_CHANNEL_IDS, ALLOWED_CHANNEL_IDS, TRACE_THREAD_NAME, isAllowedUser } from "./config.ts";
+import { isTraceThread } from "./db.ts";
 import { persistInboundDiscordMessage, persistOutboundDiscordMessage } from "./messages.ts";
 import { startTypingIndicator } from "./typing.ts";
 
@@ -15,6 +16,7 @@ export async function catchUpMissedMessages(client: Client) {
   }
 
   let channelsScanned = 0;
+  let threadsCaughtUp = 0;
   let messagesCaughtUp = 0;
 
   for (const [, guild] of client.guilds.cache) {
@@ -47,8 +49,40 @@ export async function catchUpMissedMessages(client: Client) {
       } catch (err: unknown) {
         console.error(`[Catchup] Failed to fetch messages for #${channel.name} (${channel.id}):`, (err as Error).message);
       }
+
+      // Catch up active threads in this channel
+      if ("threads" in channel && channel.threads) {
+        try {
+          const activeThreads = await (channel as any).threads.fetchActive();
+          for (const [, thread] of activeThreads.threads) {
+            if (thread.name === TRACE_THREAD_NAME || isTraceThread(thread.id)) continue;
+            try {
+              const threadMessages = await thread.messages.fetch({ limit: CATCHUP_MESSAGE_LIMIT });
+              threadsCaughtUp++;
+              const sorted = [...threadMessages.values()]
+                .filter((m: any) => !m.author.bot && isAllowedUser(m.author.id))
+                .sort((a: any, b: any) => a.createdTimestamp - b.createdTimestamp);
+              let threadHasNew = false;
+              for (const msg of sorted) {
+                const isNew = await persistInboundDiscordMessage(msg);
+                if (isNew) {
+                  messagesCaughtUp++;
+                  threadHasNew = true;
+                }
+              }
+              if (threadHasNew) {
+                startTypingIndicator(client, thread.id, persistOutboundDiscordMessage);
+              }
+            } catch (err: unknown) {
+              console.error(`[Catchup] Failed for thread "${thread.name}" (${thread.id}):`, (err as Error).message);
+            }
+          }
+        } catch (err: unknown) {
+          console.error(`[Catchup] Failed to fetch threads for #${(channel as any).name}:`, (err as Error).message);
+        }
+      }
     }
   }
 
-  console.log(`[Catchup] Done — scanned ${channelsScanned} channel(s), caught up ${messagesCaughtUp} message(s)`);
+  console.log(`[Catchup] Done — scanned ${channelsScanned} channel(s), ${threadsCaughtUp} thread(s), caught up ${messagesCaughtUp} message(s)`);
 }

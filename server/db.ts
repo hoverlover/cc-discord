@@ -133,6 +133,15 @@ export function getCurrentAgentActivity(sessionId: string, defaultAgentId: strin
   }
 }
 
+export function isTraceThread(threadId: string): boolean {
+  try {
+    const row = db.prepare("SELECT 1 FROM trace_threads WHERE thread_id = ?").get(threadId);
+    return !!row;
+  } catch {
+    return false;
+  }
+}
+
 // ── Trace thread helpers ────────────────────────────────────────────
 
 export function getTraceThreadId(channelId: string): string | null {

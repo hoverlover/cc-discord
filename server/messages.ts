@@ -23,7 +23,14 @@ export async function formatInboundMessage(message: any) {
     fullText = "[No text content]";
   }
 
-  return `${author}: ${fullText}`;
+  // Add thread context if message is from a thread
+  let prefix = author;
+  if (message.channel?.isThread?.()) {
+    const threadName = message.channel.name || "thread";
+    prefix = `${author} [thread: ${threadName}]`;
+  }
+
+  return `${prefix}: ${fullText}`;
 }
 
 export async function persistInboundDiscordMessage(message: any): Promise<boolean> {
