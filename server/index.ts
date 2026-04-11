@@ -109,19 +109,26 @@ client.once("clientReady", async () => {
 
 client.on("messageCreate", async (message) => {
   if (!message) return;
-  // Allow approved bots, block all other bots
-  if (message.author?.bot && !isAllowedBot(message.author?.id)) return;
+  
+  // Handle bot messages: allow approved bots, block all others
+  if (message.author?.bot) {
+    if (!isAllowedBot(message.author?.id)) {
+      return; // Block unapproved bots silently
+    }
+    // Approved bot - log and skip user allowlist check
+    console.log(`[Relay] Processing message from approved bot ${message.author?.username} (${message.author?.id})`);
+  } else {
+    // Regular user - check user allowlist
+    if (!isAllowedUser(message.author?.id)) {
+      console.log(`[Relay] Ignoring message from unauthorized user ${message.author?.id}`);
+      return;
+    }
+  }
+  
   if (message.type === MessageType.ThreadCreated || message.type === MessageType.ThreadStarterMessage) return;
   if (!isAllowedChannelForMessage(message)) return;
   if (message.channel?.isThread?.() && isTraceThread(message.channelId)) return;
-  if (!isAllowedUser(message.author?.id)) {
-    console.log(`[Relay] Ignoring message from unauthorized user ${message.author?.id}`);
-    return;
-  }
-  // Log when processing approved bot messages
-  if (message.author?.bot) {
-    console.log(`[Relay] Processing message from approved bot ${message.author?.username} (${message.author?.id})`);
-  }
+  
   startTypingIndicator(client, message.channelId, persistOutboundDiscordMessage);
   maybeNotifyBusyQueued(message, client, persistOutboundDiscordMessage);
   await persistInboundDiscordMessage(message);

@@ -206,6 +206,33 @@ describe("messageCreate handler simulation", () => {
         expect(result.processed).toBe(true);
       }
     });
+
+    it("should skip user allowlist check for approved bots", () => {
+      // This tests the bug fix: approved bots were being rejected by the user check
+      const result = simulateMessageCreateHandler({
+        message: {
+          id: "msg-1",
+          authorId: "approved-bot-123",
+          username: "ApprovedBot",
+          isBot: true,
+          channelId: "chan-456",
+          isThread: false,
+          isTraceThread: false,
+          content: "Hello",
+        },
+        config: {
+          allowedUserIds: ["admin-1", "admin-2"], // User allowlist is restricted
+          allowedBotIds: ["approved-bot-123"],
+          ignoredChannelIds: [],
+          allowedChannelIds: [],
+        },
+      });
+
+      expect(result.processed).toBe(true);
+      expect(result.logMessages).toContain(
+        "[Relay] Processing message from approved bot ApprovedBot (approved-bot-123)"
+      );
+    });
   });
 
   describe("regular user messages", () => {
