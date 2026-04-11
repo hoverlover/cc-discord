@@ -44,6 +44,11 @@ export const ALLOWED_DISCORD_USER_IDS = (process.env.ALLOWED_DISCORD_USER_IDS ||
   .map((s) => s.trim())
   .filter(Boolean);
 
+export const ALLOWED_BOT_IDS = (process.env.ALLOWED_BOT_IDS || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
 export const DISCORD_SESSION_ID = process.env.DISCORD_SESSION_ID || "default";
 export const CLAUDE_AGENT_ID = process.env.CLAUDE_AGENT_ID || "claude";
 
@@ -112,10 +117,14 @@ export function isAllowedChannelForMessage(message: { channelId: string; channel
   return false;
 }
 
+import { isAllowedBot as _isAllowedBot, isAllowedUser as _isAllowedUser } from "./permissions.ts";
+
 export function isAllowedUser(userId: string | undefined): boolean {
-  if (!userId) return false;
-  if (ALLOWED_DISCORD_USER_IDS.length === 0) return true;
-  return ALLOWED_DISCORD_USER_IDS.includes(userId);
+  return _isAllowedUser(userId, ALLOWED_DISCORD_USER_IDS);
+}
+
+export function isAllowedBot(userId: string | undefined): boolean {
+  return _isAllowedBot(userId, ALLOWED_BOT_IDS);
 }
 
 function loadDotEnv(path: string) {

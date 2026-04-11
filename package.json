@@ -25,6 +25,8 @@
     "start:orchestrator": "bash scripts/orchestrator.sh",
     "start:orchestrator-interactive": "bash scripts/start-orchestrator.sh",
     "dev": "bash scripts/start-relay.sh",
+    "test": "bun test",
+    "test:permissions": "bun test server/permissions.test.ts",
     "memory:smoke": "bun tools/memory-smoke.ts",
     "memory:inspect": "bun tools/memory-inspect.ts",
     "lint": "bunx biome check .",

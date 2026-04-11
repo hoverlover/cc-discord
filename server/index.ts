@@ -8,12 +8,14 @@ import { catchUpMissedMessages } from "./catchup.ts";
 import {
   ALLOWED_CHANNEL_IDS,
   ALLOWED_DISCORD_USER_IDS,
+  ALLOWED_BOT_IDS,
   BUSY_NOTIFY_COOLDOWN_MS,
   BUSY_NOTIFY_ON_QUEUE,
   DEFAULT_CHANNEL_ID,
   DISCORD_BOT_TOKEN,
   DISCORD_SESSION_ID,
   IGNORED_CHANNEL_IDS,
+  isAllowedBot,
   isAllowedChannel,
   isAllowedChannelForMessage,
   isAllowedUser,
@@ -63,6 +65,9 @@ client.once("clientReady", async () => {
   console.log(
     `[Relay] User allowlist: ${ALLOWED_DISCORD_USER_IDS.length > 0 ? ALLOWED_DISCORD_USER_IDS.join(", ") : "disabled (all users in allowed channels)"}`,
   );
+  console.log(
+    `[Relay] Approved bots: ${ALLOWED_BOT_IDS.length > 0 ? ALLOWED_BOT_IDS.join(", ") : "none (all bots blocked)"}`,
+  );
   console.log(`[Relay] API auth: ${RELAY_ALLOW_NO_AUTH ? "disabled (RELAY_ALLOW_NO_AUTH=true)" : "required"}`);
   console.log(`[Relay] Message routing: ${MESSAGE_ROUTING_MODE} mode`);
   console.log(
@@ -104,13 +109,18 @@ client.once("clientReady", async () => {
 
 client.on("messageCreate", async (message) => {
   if (!message) return;
-  if (message.author?.bot) return;
+  // Allow approved bots, block all other bots
+  if (message.author?.bot && !isAllowedBot(message.author?.id)) return;
   if (message.type === MessageType.ThreadCreated || message.type === MessageType.ThreadStarterMessage) return;
   if (!isAllowedChannelForMessage(message)) return;
   if (message.channel?.isThread?.() && isTraceThread(message.channelId)) return;
   if (!isAllowedUser(message.author?.id)) {
     console.log(`[Relay] Ignoring message from unauthorized user ${message.author?.id}`);
     return;
+  }
+  // Log when processing approved bot messages
+  if (message.author?.bot) {
+    console.log(`[Relay] Processing message from approved bot ${message.author?.username} (${message.author?.id})`);
   }
   startTypingIndicator(client, message.channelId, persistOutboundDiscordMessage);
   maybeNotifyBusyQueued(message, client, persistOutboundDiscordMessage);
