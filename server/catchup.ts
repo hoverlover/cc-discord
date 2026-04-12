@@ -4,10 +4,35 @@
  */
 
 import type { Client } from "discord.js";
-import { CATCHUP_MESSAGE_LIMIT, IGNORED_CHANNEL_IDS, ALLOWED_CHANNEL_IDS, TRACE_THREAD_NAME, isAllowedUser } from "./config.ts";
+import {
+  ALLOWED_BOT_IDS,
+  ALLOWED_CHANNEL_IDS,
+  ALLOWED_DISCORD_USER_IDS,
+  CATCHUP_MESSAGE_LIMIT,
+  IGNORED_CHANNEL_IDS,
+  TRACE_THREAD_NAME,
+} from "./config.ts";
 import { isTraceThread } from "./db.ts";
 import { persistInboundDiscordMessage, persistOutboundDiscordMessage } from "./messages.ts";
+import { shouldProcessMessage } from "./permissions.ts";
 import { startTypingIndicator } from "./typing.ts";
+
+export function shouldCatchUpMessage(
+  message: { author?: { id?: string; bot?: boolean } },
+  config: {
+    allowedUserIds?: string[];
+    allowedBotIds?: string[];
+  } = {},
+): boolean {
+  const permission = shouldProcessMessage({
+    authorId: message.author?.id,
+    isBot: Boolean(message.author?.bot),
+    allowedUserIds: config.allowedUserIds ?? ALLOWED_DISCORD_USER_IDS,
+    allowedBotIds: config.allowedBotIds ?? ALLOWED_BOT_IDS,
+  });
+
+  return permission.shouldProcess;
+}
 
 export async function catchUpMissedMessages(client: Client) {
   if (CATCHUP_MESSAGE_LIMIT <= 0) {
@@ -32,7 +57,7 @@ export async function catchUpMissedMessages(client: Client) {
 
         // Sort oldest-first so they're persisted in chronological order
         const sorted = [...messages.values()]
-          .filter((m) => !m.author.bot && isAllowedUser(m.author.id))
+          .filter((m) => shouldCatchUpMessage(m))
           .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 
         let channelHasNew = false;
@@ -60,7 +85,7 @@ export async function catchUpMissedMessages(client: Client) {
               const threadMessages = await thread.messages.fetch({ limit: CATCHUP_MESSAGE_LIMIT });
               threadsCaughtUp++;
               const sorted = [...threadMessages.values()]
-                .filter((m: any) => !m.author.bot && isAllowedUser(m.author.id))
+                .filter((m: any) => shouldCatchUpMessage(m))
                 .sort((a: any, b: any) => a.createdTimestamp - b.createdTimestamp);
               let threadHasNew = false;
               for (const msg of sorted) {

@@ -15,10 +15,7 @@ import {
   DISCORD_BOT_TOKEN,
   DISCORD_SESSION_ID,
   IGNORED_CHANNEL_IDS,
-  isAllowedBot,
-  isAllowedChannel,
   isAllowedChannelForMessage,
-  isAllowedUser,
   MESSAGE_ROUTING_MODE,
   RELAY_ALLOW_NO_AUTH,
   RELAY_API_TOKEN,
@@ -32,6 +29,7 @@ import {
 import { clearChannelModel, db, getAgentHealthAll, getChannelModel, getUnservicedTargets, isTraceThread, setChannelModel } from "./db.ts";
 import { memoryStore } from "./memory.ts";
 import { persistInboundDiscordMessage, persistOutboundDiscordMessage } from "./messages.ts";
+import { shouldProcessMessage } from "./permissions.ts";
 import { startTraceFlushLoop, stopTraceFlushLoop } from "./trace-thread.ts";
 import { startTypingIndicator, stopAllTypingSessions, stopTypingIndicator } from "./typing.ts";
 
@@ -109,22 +107,29 @@ client.once("clientReady", async () => {
 
 client.on("messageCreate", async (message) => {
   if (!message) return;
-  
-  // Handle bot messages: allow approved bots, block all others
-  if (message.author?.bot) {
-    if (!isAllowedBot(message.author?.id)) {
-      return; // Block unapproved bots silently
-    }
-    // Approved bot - log and skip user allowlist check
-    console.log(`[Relay] Processing message from approved bot ${message.author?.username} (${message.author?.id})`);
-  } else {
-    // Regular user - check user allowlist
-    if (!isAllowedUser(message.author?.id)) {
+
+  const permission = shouldProcessMessage({
+    authorId: message.author?.id,
+    isBot: Boolean(message.author?.bot),
+    allowedUserIds: ALLOWED_DISCORD_USER_IDS,
+    allowedBotIds: ALLOWED_BOT_IDS,
+  });
+
+  if (!permission.shouldProcess) {
+    if (message.author?.bot) {
+      console.log(
+        `[Relay] Ignoring message from unapproved bot ${message.author?.username} (${message.author?.id}) - ${permission.reason}`,
+      );
+    } else {
       console.log(`[Relay] Ignoring message from unauthorized user ${message.author?.id}`);
-      return;
     }
+    return;
   }
-  
+
+  if (message.author?.bot) {
+    console.log(`[Relay] Processing message from approved bot ${message.author?.username} (${message.author?.id})`);
+  }
+
   if (message.type === MessageType.ThreadCreated || message.type === MessageType.ThreadStarterMessage) return;
   if (!isAllowedChannelForMessage(message)) return;
   if (message.channel?.isThread?.() && isTraceThread(message.channelId)) return;

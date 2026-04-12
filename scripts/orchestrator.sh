@@ -53,6 +53,10 @@ log() {
   echo "[orchestrator] $(date '+%H:%M:%S') $*"
 }
 
+is_channel_id() {
+  [[ "$1" =~ ^[0-9]{15,22}$ ]]
+}
+
 # Return the array index for a channel_id, or -1 if not found
 find_channel_index() {
   local target="$1"
@@ -98,7 +102,7 @@ discover_channels_lines() {
   response=$(curl -s --max-time 10 \
     -H "x-api-token: ${RELAY_API_TOKEN}" \
     "${RELAY_URL}/api/channels?include_threads=true" 2>/dev/null) || {
-    log "WARNING: Failed to reach relay at ${RELAY_URL}"
+    log "WARNING: Failed to reach relay at ${RELAY_URL}" >&2
     return
   }
 
@@ -119,6 +123,11 @@ discover_channels_lines() {
 start_channel_agent() {
   local channel_id="$1"
   local channel_name="$2"
+
+  if ! is_channel_id "$channel_id"; then
+    log "WARNING: Refusing to start agent for invalid channel id '${channel_id}' (name='${channel_name}')"
+    return
+  fi
 
   log "Starting agent for #${channel_name} (${channel_id})"
   bash "$ROOT_DIR/scripts/channel-agent.sh" "$channel_id" "$channel_name" &
@@ -294,6 +303,10 @@ log "Relay is up. Discovering channels..."
 # Initial channel discovery — read lines into the current shell (no subshell)
 while IFS=' ' read -r channel_id channel_name; do
   [ -z "$channel_id" ] && continue
+  if ! is_channel_id "$channel_id"; then
+    log "WARNING: Ignoring malformed channel discovery line (id='${channel_id}', name='${channel_name}')"
+    continue
+  fi
   start_channel_agent "$channel_id" "$channel_name"
 done < <(discover_channels_lines)
 
@@ -372,6 +385,10 @@ while true; do
     # Check for new channels/threads
     while IFS=' ' read -r channel_id channel_name; do
       [ -z "$channel_id" ] && continue
+      if ! is_channel_id "$channel_id"; then
+        log "WARNING: Ignoring malformed channel discovery line (id='${channel_id}', name='${channel_name}')"
+        continue
+      fi
       _idx=$(find_channel_index "$channel_id")
       if [ "$_idx" -lt 0 ]; then
         log "New channel discovered: #${channel_name} (${channel_id})"
