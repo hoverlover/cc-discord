@@ -1,0 +1,6 @@
+# Local-only / dev-only files that should never ship in npm tarballs
+.gitignore
+.npmrc
+cc-discord.code-workspace
+scripts/release.sh
+.claude/skills/release/
