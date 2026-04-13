@@ -108,6 +108,14 @@ client.once("clientReady", async () => {
     const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN!);
     const commandsBody = [modelCommand.toJSON(), promptCommand.toJSON()];
 
+    // Clear old global commands to prevent duplicates when switching to guild commands
+    try {
+      await rest.put(Routes.applicationCommands(client.user!.id), { body: [] });
+      console.log("[Relay] Cleared global slash commands");
+    } catch (err: unknown) {
+      console.error("[Relay] Failed to clear global slash commands:", (err as Error).message);
+    }
+
     // Register guild-specific slash commands for instant propagation
     for (const [, guild] of client.guilds.cache) {
       try {
