@@ -7,3 +7,5 @@ data/
 logs/
 package-lock.json
 
+.npmrc
+cc-discord.code-workspace

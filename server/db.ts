@@ -77,6 +77,14 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_trace_events_pending
     ON trace_events(posted, created_at);
+
+  CREATE TABLE IF NOT EXISTS channel_prompts (
+    channel_id TEXT PRIMARY KEY,
+    prompt TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    updated_by TEXT,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 export const insertStmt = db.prepare(`
@@ -92,6 +100,37 @@ export const insertStmt = db.prepare(`
     read
   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
+
+export function getChannelPrompt(channelId: string): { prompt: string; messageId: string; updatedBy: string | null; updatedAt: string } | null {
+  try {
+    const row = db.prepare("SELECT prompt, message_id, updated_by, updated_at FROM channel_prompts WHERE channel_id = ?").get(channelId) as any;
+    if (!row) return null;
+    return {
+      prompt: row.prompt,
+      messageId: row.message_id,
+      updatedBy: row.updated_by || null,
+      updatedAt: row.updated_at,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function setChannelPrompt(channelId: string, prompt: string, messageId: string, updatedBy: string | null) {
+  db.prepare(`
+    INSERT INTO channel_prompts (channel_id, prompt, message_id, updated_by, updated_at)
+    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(channel_id) DO UPDATE SET
+      prompt = excluded.prompt,
+      message_id = excluded.message_id,
+      updated_by = excluded.updated_by,
+      updated_at = excluded.updated_at
+  `).run(channelId, prompt, messageId, updatedBy || null);
+}
+
+export function clearChannelPrompt(channelId: string) {
+  db.prepare("DELETE FROM channel_prompts WHERE channel_id = ?").run(channelId);
+}
 
 export function getChannelModel(channelId: string) {
   try {

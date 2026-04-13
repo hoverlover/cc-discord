@@ -49,6 +49,11 @@ export const ALLOWED_BOT_IDS = (process.env.ALLOWED_BOT_IDS || "")
   .map((s) => s.trim())
   .filter(Boolean);
 
+export const ALLOWED_PROMPT_USER_IDS = (process.env.ALLOWED_PROMPT_USER_IDS || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
 export const DISCORD_SESSION_ID = process.env.DISCORD_SESSION_ID || "default";
 export const CLAUDE_AGENT_ID = process.env.CLAUDE_AGENT_ID || "claude";
 
@@ -125,6 +130,11 @@ export function isAllowedUser(userId: string | undefined): boolean {
 
 export function isAllowedBot(userId: string | undefined): boolean {
   return _isAllowedBot(userId, ALLOWED_BOT_IDS);
+}
+
+export function isAllowedPromptUser(userId: string | undefined): boolean {
+  if (ALLOWED_PROMPT_USER_IDS.length === 0) return true;
+  return !!userId && ALLOWED_PROMPT_USER_IDS.includes(userId);
 }
 
 function loadDotEnv(path: string) {

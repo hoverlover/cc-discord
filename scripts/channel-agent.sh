@@ -98,6 +98,30 @@ SYSTEM_PROMPT="$(sed \
   -e "s|__CHANNEL_NAME__|${CHANNEL_NAME}|g" \
   "$PROMPT_TEMPLATE")"
 
+# Fetch any pinned system prompt override from the channel
+RELAY_URL="${RELAY_URL:-http://${RELAY_HOST:-127.0.0.1}:${RELAY_PORT:-3199}}"
+PINNED_PROMPT=""
+if [ -n "$RELAY_API_TOKEN" ]; then
+  PINNED_RESPONSE=$(curl -s --max-time 10 \
+    -H "x-api-token: ${RELAY_API_TOKEN}" \
+    "${RELAY_URL}/api/channels/${CHANNEL_ID}/pinned-prompt" 2>/dev/null) || true
+  PINNED_PROMPT=$(echo "$PINNED_RESPONSE" | bun -e "
+    import { stdin } from 'process';
+    const input = await Bun.readableStreamToText(stdin);
+    try {
+      const data = JSON.parse(input);
+      if (data.success && data.prompt) {
+        process.stdout.write(data.prompt);
+      }
+    } catch {}
+  " 2>/dev/null) || true
+fi
+
+if [ -n "$PINNED_PROMPT" ]; then
+  echo "[channel-agent:$CHANNEL_NAME] Appending pinned system prompt (${#PINNED_PROMPT} chars)"
+  SYSTEM_PROMPT="${SYSTEM_PROMPT}\n\n## Channel-specific instructions (from pinned message)\n\n${PINNED_PROMPT}"
+fi
+
 # Permission mode
 if [ "${AUTO_REPLY_PERMISSION_MODE:-skip}" = "accept-edits" ]; then
   PERMISSION_ARGS=(--permission-mode acceptEdits)
@@ -115,13 +139,31 @@ PARSER="$ROOT_DIR/scripts/parse-claude-stream.ts"
 echo "[channel-agent:$CHANNEL_NAME] Starting claude -p (channel=$CHANNEL_ID, session=$DISCORD_SESSION_ID, runtime=$CLAUDE_RUNTIME_ID)"
 echo "[channel-agent:$CHANNEL_NAME] Logging to $LOG_FILE"
 
+# Write PID so the relay can signal us for event-driven restarts
+AGENT_PID_FILE="/tmp/cc-discord/agent-${CHANNEL_ID}.pid"
+printf '%s' "$$" > "$AGENT_PID_FILE"
+
 # Write the system prompt to a temp file to avoid quoting issues in pipes.
 PROMPT_FILE=$(mktemp /tmp/cc-discord-prompt-XXXXXX)
 printf '%s' "$SYSTEM_PROMPT" > "$PROMPT_FILE"
 
+# Hash helper for comparing pinned prompts
+hash_string() {
+  if command -v md5sum >/dev/null 2>&1; then
+    printf '%s' "$1" | md5sum | awk '{print $1}'
+  else
+    printf '%s' "$1" | md5 -q
+  fi
+}
+
+PROMPT_HASH_FILE="/tmp/cc-discord/pinned-prompt-hash-${CHANNEL_ID}"
+INITIAL_HASH=$(hash_string "${PINNED_PROMPT}")
+printf '%s' "$INITIAL_HASH" > "$PROMPT_HASH_FILE"
+
 # On exit: clean up temp file, kill orphaned pollers, and kill child processes.
 cleanup_agent() {
   rm -f "$PROMPT_FILE"
+  rm -f "$AGENT_PID_FILE"
   # Kill any poller left behind by this session
   if [ -f "$POLLER_LOCK" ]; then
     local lpid
@@ -139,6 +181,42 @@ cleanup_agent() {
   fi
 }
 trap cleanup_agent EXIT
+
+# Background watcher: restart this agent when the pinned prompt changes
+(
+  trap '' TERM INT
+  WATCH_INTERVAL=300
+  while true; do
+    sleep "$WATCH_INTERVAL"
+    response=$(curl -s --max-time 10 \
+      -H "x-api-token: ${RELAY_API_TOKEN}" \
+      "${RELAY_URL}/api/channels/${CHANNEL_ID}/pinned-prompt" 2>/dev/null) || continue
+    pinned=$(echo "$response" | bun -e "
+      import { stdin } from 'process';
+      const input = await Bun.readableStreamToText(stdin);
+      try {
+        const data = JSON.parse(input);
+        if (data.success && data.prompt) {
+          process.stdout.write(data.prompt);
+        }
+      } catch {}
+    " 2>/dev/null) || continue
+    current_hash=$(hash_string "${pinned}")
+    last_hash=$(cat "$PROMPT_HASH_FILE" 2>/dev/null || echo "")
+    if [ "$current_hash" != "$last_hash" ]; then
+      echo "[channel-agent:$CHANNEL_NAME] Detected pinned prompt change. Restarting agent..."
+      printf '%s' "$current_hash" > "$PROMPT_HASH_FILE"
+      send-discord --channel "$CHANNEL_ID" "Restarting to apply updated channel system prompt..."
+      # Kill the main script to trigger an orchestrator restart
+      kill -TERM "$$" 2>/dev/null || true
+      sleep 2
+      kill -KILL "$$" 2>/dev/null || true
+      break
+    fi
+  done
+) &
+
+WATCHER_PID=$!
 
 # Run claude in headless/print mode with stream-json output.
 # The stream is piped through the parser which extracts reasoning, tool
@@ -167,3 +245,7 @@ else
     -- "Begin listening for messages in #${CHANNEL_NAME} now." \
     >> "$LOG_FILE" 2>&1
 fi
+
+# Normal exit: stop the watcher
+kill "$WATCHER_PID" 2>/dev/null || true
+wait "$WATCHER_PID" 2>/dev/null || true
