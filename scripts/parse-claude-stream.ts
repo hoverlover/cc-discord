@@ -42,8 +42,7 @@ const DATA_DIR = process.env.CC_DISCORD_DATA_DIR || join(process.env.HOME || "",
 
 let traceDb: InstanceType<typeof DatabaseSync> | null = null;
 
-function getTraceDb(): InstanceType<typeof DatabaseSync> | null {
-  if (!TRACE_ENABLED) return null;
+function getStateDb(): InstanceType<typeof DatabaseSync> | null {
   if (traceDb) return traceDb;
   try {
     const dbPath = join(DATA_DIR, "messages.db");
@@ -62,6 +61,13 @@ function getTraceDb(): InstanceType<typeof DatabaseSync> | null {
       );
       CREATE INDEX IF NOT EXISTS idx_trace_events_pending
         ON trace_events(posted, created_at);
+
+      CREATE TABLE IF NOT EXISTS channel_agent_sessions (
+        channel_id TEXT PRIMARY KEY,
+        claude_session_id TEXT NOT NULL,
+        session_name TEXT,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
     `);
     return traceDb;
   } catch {
@@ -71,7 +77,8 @@ function getTraceDb(): InstanceType<typeof DatabaseSync> | null {
 
 function writeTraceEvent(eventType: string, toolName: string | null, summary: string) {
   try {
-    const db = getTraceDb();
+    if (!TRACE_ENABLED) return;
+    const db = getStateDb();
     if (!db) return;
     db.prepare(`
       INSERT INTO trace_events (session_id, agent_id, channel_id, event_type, tool_name, summary)
@@ -79,6 +86,26 @@ function writeTraceEvent(eventType: string, toolName: string | null, summary: st
     `).run(TRACE_SESSION_ID, TRACE_AGENT_ID, TRACE_CHANNEL_ID, eventType, toolName, summary);
   } catch {
     // fail-open — never break the parser for trace
+  }
+}
+
+function persistChannelAgentSession(claudeSessionId: string) {
+  try {
+    if (!/^\d{15,22}$/.test(TRACE_AGENT_ID)) return;
+    if (!claudeSessionId || claudeSessionId === "?") return;
+    const db = getStateDb();
+    if (!db) return;
+    const sessionName = `channel-${TRACE_AGENT_ID}`;
+    db.prepare(`
+      INSERT INTO channel_agent_sessions (channel_id, claude_session_id, session_name, updated_at)
+      VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(channel_id) DO UPDATE SET
+        claude_session_id = excluded.claude_session_id,
+        session_name = excluded.session_name,
+        updated_at = excluded.updated_at
+    `).run(TRACE_AGENT_ID, claudeSessionId, sessionName);
+  } catch {
+    // fail-open — never break the parser for session persistence
   }
 }
 
@@ -121,6 +148,7 @@ function handleEvent(evt: any) {
       const model = evt.model ?? "?";
       const sid = evt.session_id ?? "?";
       const mode = evt.permissionMode ?? "?";
+      persistChannelAgentSession(String(sid));
       log("init", `model=${model} session=${sid} mode=${mode}`);
       return;
     }
@@ -262,6 +290,7 @@ function handleEvent(evt: any) {
   // -- init (legacy format) --
   if (type === "init") {
     const sid = evt.session_id ?? "unknown";
+    persistChannelAgentSession(String(sid));
     log("init", `session=${sid}`);
     return;
   }

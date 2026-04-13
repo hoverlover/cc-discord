@@ -85,6 +85,13 @@ db.exec(`
     updated_by TEXT,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS channel_agent_sessions (
+    channel_id TEXT PRIMARY KEY,
+    claude_session_id TEXT NOT NULL,
+    session_name TEXT,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 export const insertStmt = db.prepare(`

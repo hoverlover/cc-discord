@@ -171,7 +171,7 @@ function buildChannelPromptContext(db: InstanceType<typeof DatabaseSync>): strin
     const row = db.prepare("SELECT prompt FROM channel_prompts WHERE channel_id = ?").get(promptChannelId) as any;
     const prompt = String(row?.prompt || "").trim();
     if (!prompt) return "";
-    return `ACTIVE CHANNEL PROMPT:\n${prompt}`;
+    return `ACTIVE CHANNEL PROMPT (authoritative):\n${prompt}\n\nIf earlier conversation state conflicts with this prompt, follow this prompt.`;
   } catch {
     return "";
   }

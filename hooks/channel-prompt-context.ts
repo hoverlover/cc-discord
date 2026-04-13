@@ -67,7 +67,7 @@ try {
     JSON.stringify({
       hookSpecificOutput: {
         hookEventName: hookEvent,
-        additionalContext: `ACTIVE CHANNEL PROMPT:\n${prompt}`,
+        additionalContext: `ACTIVE CHANNEL PROMPT (authoritative):\n${prompt}\n\nIf earlier conversation state conflicts with this prompt, follow this prompt.`,
       },
     }),
   );

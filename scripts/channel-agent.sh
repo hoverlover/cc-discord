@@ -120,9 +120,11 @@ if [ -n "$PINNED_PROMPT" ]; then
   echo "[channel-agent:$CHANNEL_NAME] Appending pinned system prompt (${#PINNED_PROMPT} chars)"
   SYSTEM_PROMPT="${SYSTEM_PROMPT}
 
-## Channel-specific instructions (from pinned message)
+## Channel-specific instructions (authoritative current prompt)
 
-${PINNED_PROMPT}"
+${PINNED_PROMPT}
+
+If earlier conversation state conflicts with this prompt, follow this prompt."
 else
   echo "[channel-agent:$CHANNEL_NAME] No channel-specific prompt found at startup"
 fi
@@ -151,6 +153,59 @@ printf '%s' "$$" > "$AGENT_PID_FILE"
 # Write the system prompt to a temp file to avoid quoting issues in pipes.
 PROMPT_FILE=$(mktemp /tmp/cc-discord-prompt-XXXXXX)
 printf '%s' "$SYSTEM_PROMPT" > "$PROMPT_FILE"
+
+DATA_DIR="${CC_DISCORD_DATA_DIR:-${HOME}/.cc-discord/data}"
+MESSAGES_DB_PATH="${DATA_DIR}/messages.db"
+
+load_stored_session_id() {
+  [ -f "$MESSAGES_DB_PATH" ] || return 0
+  MESSAGES_DB_PATH="$MESSAGES_DB_PATH" CHANNEL_ID="$CHANNEL_ID" bun -e '
+    import { Database } from "bun:sqlite";
+    const dbPath = process.env.MESSAGES_DB_PATH;
+    const channelId = process.env.CHANNEL_ID;
+    if (!dbPath || !channelId) process.exit(0);
+    const db = new Database(dbPath);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS channel_agent_sessions (
+        channel_id TEXT PRIMARY KEY,
+        claude_session_id TEXT NOT NULL,
+        session_name TEXT,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    const row = db.prepare("SELECT claude_session_id FROM channel_agent_sessions WHERE channel_id = ?").get(channelId) as any;
+    if (row?.claude_session_id) process.stdout.write(String(row.claude_session_id));
+    db.close();
+  ' 2>/dev/null || true
+}
+
+clear_stored_session_id() {
+  [ -f "$MESSAGES_DB_PATH" ] || return 0
+  MESSAGES_DB_PATH="$MESSAGES_DB_PATH" CHANNEL_ID="$CHANNEL_ID" bun -e '
+    import { Database } from "bun:sqlite";
+    const dbPath = process.env.MESSAGES_DB_PATH;
+    const channelId = process.env.CHANNEL_ID;
+    if (!dbPath || !channelId) process.exit(0);
+    const db = new Database(dbPath);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS channel_agent_sessions (
+        channel_id TEXT PRIMARY KEY,
+        claude_session_id TEXT NOT NULL,
+        session_name TEXT,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    db.prepare("DELETE FROM channel_agent_sessions WHERE channel_id = ?").run(channelId);
+    db.close();
+  ' 2>/dev/null || true
+}
+
+STORED_CLAUDE_SESSION_ID="$(load_stored_session_id)"
+if [ -n "$STORED_CLAUDE_SESSION_ID" ]; then
+  echo "[channel-agent:$CHANNEL_NAME] Resuming Claude session $STORED_CLAUDE_SESSION_ID"
+else
+  echo "[channel-agent:$CHANNEL_NAME] Starting fresh Claude session"
+fi
 
 # Hash helper for comparing pinned prompts
 hash_string() {
@@ -224,34 +279,55 @@ trap cleanup_agent EXIT
 
 WATCHER_PID=$!
 
-# Run claude in headless/print mode with stream-json output.
-# The stream is piped through the parser which extracts reasoning, tool
-# calls, and errors into human-readable log lines.
-# If the parser is missing, fall back to raw output.
-if [ -f "$PARSER" ]; then
-  claude \
-    -p \
-    --output-format stream-json \
-    --verbose \
-    --settings "$SETTINGS_PATH" \
-    "${PERMISSION_ARGS[@]}" \
-    --system-prompt-file "$PROMPT_FILE" \
-    --no-session-persistence \
-    -- "Begin listening for messages in #${CHANNEL_NAME} now." 2>&1 \
-  | bun "$PARSER" >> "$LOG_FILE" 2>&1
+run_claude_once() {
+  local resume_id="$1"
+  local -a args
+  args=(
+    -p
+    --output-format stream-json
+    --verbose
+    --settings "$SETTINGS_PATH"
+    "${PERMISSION_ARGS[@]}"
+    --append-system-prompt-file "$PROMPT_FILE"
+  )
+
+  if [ -n "$resume_id" ]; then
+    args+=(--resume "$resume_id")
+  fi
+
+  if [ -f "$PARSER" ]; then
+    claude "${args[@]}" -- "Begin listening for messages in #${CHANNEL_NAME} now." 2>&1 \
+      | bun "$PARSER" >> "$LOG_FILE" 2>&1
+  else
+    echo "[channel-agent:$CHANNEL_NAME] WARNING: Parser not found at $PARSER — using raw output"
+    claude "${args[@]}" -- "Begin listening for messages in #${CHANNEL_NAME} now." \
+      >> "$LOG_FILE" 2>&1
+  fi
+}
+
+CLAUDE_EXIT=0
+if [ -n "$STORED_CLAUDE_SESSION_ID" ]; then
+  set +e
+  run_claude_once "$STORED_CLAUDE_SESSION_ID"
+  CLAUDE_EXIT=$?
+  set -e
+  if [ "$CLAUDE_EXIT" -ne 0 ]; then
+    echo "[channel-agent:$CHANNEL_NAME] Resume failed for Claude session $STORED_CLAUDE_SESSION_ID; clearing stored session and starting fresh"
+    clear_stored_session_id
+    STORED_CLAUDE_SESSION_ID=""
+    set +e
+    run_claude_once ""
+    CLAUDE_EXIT=$?
+    set -e
+  fi
 else
-  echo "[channel-agent:$CHANNEL_NAME] WARNING: Parser not found at $PARSER — using raw output"
-  claude \
-    -p \
-    --output-format stream-json \
-    --settings "$SETTINGS_PATH" \
-    "${PERMISSION_ARGS[@]}" \
-    --system-prompt-file "$PROMPT_FILE" \
-    --no-session-persistence \
-    -- "Begin listening for messages in #${CHANNEL_NAME} now." \
-    >> "$LOG_FILE" 2>&1
+  set +e
+  run_claude_once ""
+  CLAUDE_EXIT=$?
+  set -e
 fi
 
 # Normal exit: stop the watcher
 kill "$WATCHER_PID" 2>/dev/null || true
 wait "$WATCHER_PID" 2>/dev/null || true
+exit "$CLAUDE_EXIT"
