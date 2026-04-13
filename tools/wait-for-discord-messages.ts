@@ -209,30 +209,6 @@ async function buildMemoryContext(queryText: string): Promise<string> {
   }
 }
 
-function buildChannelPromptContext(db: InstanceType<typeof DatabaseSync>): string {
-  const promptChannelId = channelFilter || (isChannelAgent ? agentId : "");
-  if (!promptChannelId) return "";
-
-  try {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS channel_prompts (
-        channel_id TEXT PRIMARY KEY,
-        prompt TEXT NOT NULL,
-        message_id TEXT NOT NULL,
-        updated_by TEXT,
-        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-    const row = db.prepare("SELECT prompt FROM channel_prompts WHERE channel_id = ?").get(promptChannelId) as any;
-    const prompt = String(row?.prompt || "").trim();
-    if (!prompt) return "";
-    return `ACTIVE CHANNEL PROMPT:\n${prompt}`;
-  } catch {
-    return "";
-  }
-}
-
 function checkCount(db: InstanceType<typeof DatabaseSync>): number {
   const channelClause = channelFilter ? " AND channel_id = ?" : "";
   const params: any[] = channelFilter ? [sessionId, ...targets, channelFilter] : [sessionId, ...targets];
@@ -283,9 +259,8 @@ async function deliverMessages(db: InstanceType<typeof DatabaseSync>): Promise<b
 
   const latestQueryText = String(rows[rows.length - 1]?.content || "");
   const memoryText = await buildMemoryContext(latestQueryText);
-  const channelPromptText = buildChannelPromptContext(db);
   const inboxText = `NEW DISCORD MESSAGE(S): ${formatted.join(" | ")}`;
-  const outputText = [inboxText, channelPromptText, memoryText].filter(Boolean).join("\n\n");
+  const outputText = memoryText ? `${inboxText}\n\n${memoryText}` : inboxText;
 
   console.log(outputText);
   return true;

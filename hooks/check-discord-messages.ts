@@ -235,7 +235,9 @@ try {
       queryText: latestQueryText,
       runtimeState,
     });
-    const contextText = [inboxText, channelPromptText, memoryText].filter(Boolean).join("\n\n");
+    const contextText = [inboxText, hookEvent === "SessionStart" ? channelPromptText : "", memoryText]
+      .filter(Boolean)
+      .join("\n\n");
 
     if (hookEvent === "Stop") {
       process.stdout.write(
