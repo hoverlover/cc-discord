@@ -494,7 +494,7 @@ app.get("/api/channels/:channelId/pinned-prompt", async (req: Request, res: Resp
       return;
     }
 
-    const pinned = await (channel as any).messages.fetchPinned();
+    const pinned = await (channel as any).messages.fetchPins();
     let prompt: string | null = null;
     let messageId: string | null = null;
     for (const [, msg] of pinned) {
