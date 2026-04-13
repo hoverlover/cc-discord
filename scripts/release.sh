@@ -45,9 +45,9 @@ echo "   Current version: v$CURRENT_VERSION"
 # Calculate new version
 NEW_VERSION=$(node -p "
   const [major, minor, patch] = '$CURRENT_VERSION'.split('.').map(Number);
-  if ('$BUMP' === 'major') console.log(\`\${major + 1}.0.0\`);
-  else if ('$BUMP' === 'minor') console.log(\`\${major}.\${minor + 1}.0\`);
-  else console.log(\`\${major}.\${minor}.\${patch + 1}\`);
+  if ('$BUMP' === 'major') \`\${major + 1}.0.0\`;
+  else if ('$BUMP' === 'minor') \`\${major}.\${minor + 1}.0\`;
+  else \`\${major}.\${minor}.\${patch + 1}\`;
 ")
 echo "   New version: v$NEW_VERSION"
 echo ""
