@@ -106,8 +106,7 @@ if [ -n "$RELAY_API_TOKEN" ]; then
     -H "x-api-token: ${RELAY_API_TOKEN}" \
     "${RELAY_URL}/api/channels/${CHANNEL_ID}/pinned-prompt" 2>/dev/null) || true
   PINNED_PROMPT=$(echo "$PINNED_RESPONSE" | bun -e "
-    import { stdin } from 'process';
-    const input = await Bun.readableStreamToText(stdin);
+    const input = require('fs').readFileSync(0, 'utf8');
     try {
       const data = JSON.parse(input);
       if (data.success && data.prompt) {
@@ -194,8 +193,7 @@ trap cleanup_agent EXIT
       -H "x-api-token: ${RELAY_API_TOKEN}" \
       "${RELAY_URL}/api/channels/${CHANNEL_ID}/pinned-prompt" 2>/dev/null) || continue
     pinned=$(echo "$response" | bun -e "
-      import { stdin } from 'process';
-      const input = await Bun.readableStreamToText(stdin);
+      const input = require('fs').readFileSync(0, 'utf8');
       try {
         const data = JSON.parse(input);
         if (data.success && data.prompt) {
