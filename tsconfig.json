@@ -12,7 +12,8 @@
     "resolveJsonModule": true,
     "allowJs": true,
     "checkJs": false,
-    "lib": ["ESNext"]
+    "lib": ["ESNext", "DOM"],
+    "types": ["bun-types", "node"]
   },
   "include": [
     "server/**/*.ts",

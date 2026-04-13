@@ -38,6 +38,17 @@ fi
 echo "⬇️  Pulling latest changes..."
 git pull origin main
 
+# Install pinned dependencies and run validation before releasing
+# This catches type/test regressions before we version, tag, and publish.
+echo "📥 Installing dependencies..."
+npm ci
+
+echo "🔎 Running typecheck..."
+npm run typecheck
+
+echo "🧪 Running tests..."
+npm test
+
 # Get current version
 CURRENT_VERSION=$(node -p "require('./package.json').version")
 echo "   Current version: v$CURRENT_VERSION"

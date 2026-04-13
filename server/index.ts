@@ -478,7 +478,7 @@ app.get("/api/channels/:channelId/pinned-prompt", async (req: Request, res: Resp
       return;
     }
 
-    const { channelId } = req.params;
+    const channelId = String(req.params.channelId || "");
 
     // Prefer database record (source of truth for slash-command-managed prompts)
     const dbPrompt = getChannelPrompt(channelId);
@@ -494,11 +494,13 @@ app.get("/api/channels/:channelId/pinned-prompt", async (req: Request, res: Resp
       return;
     }
 
-    const pinned = await (channel as any).messages.fetchPins();
+    const pinnedResponse = await (channel as any).messages.fetchPins();
+    const pinnedItems = Array.isArray(pinnedResponse?.items) ? pinnedResponse.items : [];
     let prompt: string | null = null;
     let messageId: string | null = null;
-    for (const [, msg] of pinned) {
-      const text = msg.content?.trim() || "";
+    for (const item of pinnedItems) {
+      const msg = item?.message;
+      const text = msg?.content?.trim() || "";
       const match = text.match(/^!(?:system|prompt)\s+(.*)/is);
       if (match) {
         prompt = match[1].trim();
