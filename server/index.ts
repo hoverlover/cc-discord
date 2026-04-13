@@ -308,6 +308,7 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     if (subcommand === "clear") {
+      await interaction.deferReply();
       const existing = getChannelPrompt(interaction.channelId);
       if (existing) {
         clearChannelPrompt(interaction.channelId);
@@ -321,27 +322,36 @@ client.on("interactionCreate", async (interaction) => {
           // ignore unpin failures
         }
       }
-      await interaction.reply("Channel system prompt cleared.");
+      await interaction.editReply("Channel system prompt cleared.");
       console.log(`[Relay] Prompt cleared for channel ${interaction.channelId} by ${interaction.user?.tag}`);
       await notifyAndRestartAgent(interaction.channelId, "cleared channel system prompt");
       return;
     }
 
     if (subcommand === "set") {
-      const text = interaction.options.getString("text", true).trim();
+      await interaction.deferReply();
+      const rawText = interaction.options.getString("text", true).trim();
+      const text = rawText.replace(/\\n/g, "\n");
       if (!text) {
-        await interaction.reply({ content: "Prompt text cannot be empty.", ephemeral: true });
+        await interaction.editReply("Prompt text cannot be empty.");
         return;
       }
 
       const channel = await client.channels.fetch(interaction.channelId);
       if (!channel || !channel.isTextBased() || !("send" in channel)) {
-        await interaction.reply({ content: "Cannot send messages in this channel.", ephemeral: true });
+        await interaction.editReply("Cannot send messages in this channel.");
         return;
       }
 
       const promptMessage = await (channel as any).send(text);
-      await promptMessage.pin();
+
+      let pinned = false;
+      try {
+        await promptMessage.pin();
+        pinned = true;
+      } catch (err: any) {
+        console.error(`[Relay] Failed to pin prompt message in ${interaction.channelId}:`, err.message);
+      }
 
       const existing = getChannelPrompt(interaction.channelId);
       setChannelPrompt(interaction.channelId, text, promptMessage.id, interaction.user?.id || null);
@@ -355,7 +365,13 @@ client.on("interactionCreate", async (interaction) => {
         }
       }
 
-      await interaction.reply("Channel system prompt updated. Restarting agent...");
+      if (pinned) {
+        await interaction.editReply("Channel system prompt updated. Restarting agent...");
+      } else {
+        await interaction.editReply(
+          "Channel system prompt updated, but I couldn't pin the message. Please grant me the **Manage Messages** permission so the prompt stays visible and editable. Restarting agent...",
+        );
+      }
       console.log(`[Relay] Prompt set for channel ${interaction.channelId} by ${interaction.user?.tag}`);
       await notifyAndRestartAgent(interaction.channelId, "updated channel system prompt");
       return;
