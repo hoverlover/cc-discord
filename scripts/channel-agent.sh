@@ -151,8 +151,10 @@ printf '%s' "$SYSTEM_PROMPT" > "$PROMPT_FILE"
 hash_string() {
   if command -v md5sum >/dev/null 2>&1; then
     printf '%s' "$1" | md5sum | awk '{print $1}'
-  else
+  elif command -v md5 >/dev/null 2>&1; then
     printf '%s' "$1" | md5 -q
+  else
+    printf '%s' "$1" | openssl dgst -md5 | awk '{print $NF}'
   fi
 }
 
