@@ -118,7 +118,13 @@ fi
 
 if [ -n "$PINNED_PROMPT" ]; then
   echo "[channel-agent:$CHANNEL_NAME] Appending pinned system prompt (${#PINNED_PROMPT} chars)"
-  SYSTEM_PROMPT="${SYSTEM_PROMPT}\n\n## Channel-specific instructions (from pinned message)\n\n${PINNED_PROMPT}"
+  SYSTEM_PROMPT="${SYSTEM_PROMPT}
+
+## Channel-specific instructions (from pinned message)
+
+${PINNED_PROMPT}"
+else
+  echo "[channel-agent:$CHANNEL_NAME] No channel-specific prompt found at startup"
 fi
 
 # Permission mode

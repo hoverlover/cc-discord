@@ -153,6 +153,30 @@ function truncateForMemory(text: string, maxLen: number): string {
   return `${oneLine.slice(0, maxLen - 1)}…`;
 }
 
+function buildChannelPromptContext(db: InstanceType<typeof DatabaseSync>): string {
+  const promptChannelId = /^\d{15,22}$/.test(agentId) ? agentId : "";
+  if (!promptChannelId) return "";
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS channel_prompts (
+        channel_id TEXT PRIMARY KEY,
+        prompt TEXT NOT NULL,
+        message_id TEXT NOT NULL,
+        updated_by TEXT,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    const row = db.prepare("SELECT prompt FROM channel_prompts WHERE channel_id = ?").get(promptChannelId) as any;
+    const prompt = String(row?.prompt || "").trim();
+    if (!prompt) return "";
+    return `ACTIVE CHANNEL PROMPT:\n${prompt}`;
+  } catch {
+    return "";
+  }
+}
+
 let hookInput: any;
 try {
   const chunks: Buffer[] = [];
@@ -192,6 +216,8 @@ try {
   `)
     .all(sessionId, ...targets) as any[];
 
+  const channelPromptText = buildChannelPromptContext(db);
+
   if (rows.length > 0) {
     const ids = rows.map((r: any) => r.id);
     const idPlaceholders = ids.map(() => "?").join(",");
@@ -209,7 +235,7 @@ try {
       queryText: latestQueryText,
       runtimeState,
     });
-    const contextText = memoryText ? `${inboxText}\n\n${memoryText}` : inboxText;
+    const contextText = [inboxText, channelPromptText, memoryText].filter(Boolean).join("\n\n");
 
     if (hookEvent === "Stop") {
       process.stdout.write(
@@ -233,6 +259,19 @@ try {
   }
 
   db.exec("COMMIT");
+
+  if (hookEvent === "SessionStart" && channelPromptText) {
+    process.stdout.write(
+      JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: hookEvent,
+          additionalContext: channelPromptText,
+        },
+      }),
+    );
+    process.exit(0);
+  }
+
   process.exit(0);
 } catch {
   try {
