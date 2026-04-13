@@ -106,10 +106,19 @@ client.once("clientReady", async () => {
       .addSubcommand((sub) => sub.setName("clear").setDescription("Clear the channel system prompt"));
 
     const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN!);
-    await rest.put(Routes.applicationCommands(client.user!.id), { body: [modelCommand.toJSON(), promptCommand.toJSON()] });
-    console.log("[Relay] Registered /model and /prompt slash commands");
+    const commandsBody = [modelCommand.toJSON(), promptCommand.toJSON()];
+
+    // Register guild-specific slash commands for instant propagation
+    for (const [, guild] of client.guilds.cache) {
+      try {
+        await rest.put(Routes.applicationGuildCommands(client.user!.id, guild.id), { body: commandsBody });
+        console.log(`[Relay] Registered slash commands in guild ${guild.name} (${guild.id})`);
+      } catch (err: unknown) {
+        console.error(`[Relay] Failed to register slash commands in guild ${guild.id}:`, (err as Error).message);
+      }
+    }
   } catch (err: unknown) {
-    console.error("[Relay] Failed to register slash commands:", (err as Error).message);
+    console.error("[Relay] Failed to build slash commands:", (err as Error).message);
   }
 
   // Start live trace thread flush loop
@@ -119,6 +128,42 @@ client.once("clientReady", async () => {
   catchUpMissedMessages(client).catch((err) => {
     console.error("[Relay] Catch-up failed:", (err as Error).message);
   });
+});
+
+client.on("guildCreate", async (guild) => {
+  try {
+    const modelCommand = new SlashCommandBuilder()
+      .setName("model")
+      .setDescription("Get or set the Claude model for this channel")
+      .addStringOption((option) =>
+        option
+          .setName("name")
+          .setDescription(
+            "Model name or alias (e.g. claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5, or full model ID)",
+          )
+          .setRequired(false),
+      );
+
+    const promptCommand = new SlashCommandBuilder()
+      .setName("prompt")
+      .setDescription("Manage the channel system prompt")
+      .addSubcommand((sub) =>
+        sub
+          .setName("set")
+          .setDescription("Set or update the channel system prompt")
+          .addStringOption((opt) => opt.setName("text").setDescription("The system prompt text").setRequired(true)),
+      )
+      .addSubcommand((sub) => sub.setName("view").setDescription("View the current channel system prompt"))
+      .addSubcommand((sub) => sub.setName("clear").setDescription("Clear the channel system prompt"));
+
+    const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN!);
+    await rest.put(Routes.applicationGuildCommands(client.user!.id, guild.id), {
+      body: [modelCommand.toJSON(), promptCommand.toJSON()],
+    });
+    console.log(`[Relay] Registered slash commands in new guild ${guild.name} (${guild.id})`);
+  } catch (err: unknown) {
+    console.error(`[Relay] Failed to register slash commands in new guild ${guild.id}:`, (err as Error).message);
+  }
 });
 
 client.on("messageCreate", async (message) => {
