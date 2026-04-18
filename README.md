@@ -241,7 +241,7 @@ Discord attachments are downloaded to a temp directory and delivered to Claude a
 Use `/model` in any channel to get or set the Claude model for that channel:
 
 - `/model` — show the current model
-- `/model name:claude-opus-4-6` — set the model
+- `/model name:claude-opus-4-7` — set the model
 - `/model name:clear` — reset to default
 
 ### Memory system

@@ -86,7 +86,7 @@ client.once("clientReady", async () => {
         option
           .setName("name")
           .setDescription(
-            "Model name or alias (e.g. claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5, or full model ID)",
+            "Model name or alias (e.g. claude-opus-4-7, claude-sonnet-4-7, claude-haiku-4-5, or full model ID)",
           )
           .setRequired(false),
       );
@@ -147,7 +147,7 @@ client.on("guildCreate", async (guild) => {
         option
           .setName("name")
           .setDescription(
-            "Model name or alias (e.g. claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5, or full model ID)",
+            "Model name or alias (e.g. claude-opus-4-7, claude-sonnet-4-7, claude-haiku-4-5, or full model ID)",
           )
           .setRequired(false),
       );
