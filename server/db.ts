@@ -116,16 +116,31 @@ export function hasMessageByExternalId(source: string, externalId: string): bool
   return existsByExternalIdStmt.get(source, externalId) != null;
 }
 
-export function getChannelPrompt(channelId: string): { prompt: string; messageId: string; updatedBy: string | null; updatedAt: string } | null {
+export function getChannelPrompt(channelId: string, parentChannelId?: string | null): { prompt: string; messageId: string; updatedBy: string | null; updatedAt: string } | null {
   try {
+    // First, check for a prompt at the specific channel/thread level
     const row = db.prepare("SELECT prompt, message_id, updated_by, updated_at FROM channel_prompts WHERE channel_id = ?").get(channelId) as any;
-    if (!row) return null;
-    return {
-      prompt: row.prompt,
-      messageId: row.message_id,
-      updatedBy: row.updated_by || null,
-      updatedAt: row.updated_at,
-    };
+    if (row) {
+      return {
+        prompt: row.prompt,
+        messageId: row.message_id,
+        updatedBy: row.updated_by || null,
+        updatedAt: row.updated_at,
+      };
+    }
+    // Fall back to parent channel prompt if we're in a thread with no thread-specific prompt
+    if (parentChannelId) {
+      const parentRow = db.prepare("SELECT prompt, message_id, updated_by, updated_at FROM channel_prompts WHERE channel_id = ?").get(parentChannelId) as any;
+      if (parentRow) {
+        return {
+          prompt: parentRow.prompt,
+          messageId: parentRow.message_id,
+          updatedBy: parentRow.updated_by || null,
+          updatedAt: parentRow.updated_at,
+        };
+      }
+    }
+    return null;
   } catch {
     return null;
   }

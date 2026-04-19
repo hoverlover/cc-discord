@@ -264,11 +264,16 @@ async function notifyAndRestartAgent(channelId: string, reason: string) {
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
+  // In Discord.js, interaction.channelId always returns the PARENT channel ID
+  // when the interaction occurs in a thread. Use interaction.channel?.id to get
+  // the actual thread ID when in a thread.
+  const channelId = interaction.channel?.id ?? interaction.channelId;
+
   if (interaction.commandName === "model") {
     const modelArg = interaction.options.getString("name");
 
     if (!modelArg) {
-      const current = getChannelModel(interaction.channelId);
+      const current = getChannelModel(channelId);
       await interaction.reply(
         current ? `Current model for this channel: \`${current}\`` : "No model set for this channel (using default).",
       );
@@ -276,15 +281,15 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     if (modelArg === "clear" || modelArg === "reset" || modelArg === "default") {
-      clearChannelModel(interaction.channelId);
+      clearChannelModel(channelId);
       await interaction.reply("Model override cleared for this channel. Using default model.");
-      console.log(`[Relay] Model cleared for channel ${interaction.channelId} by ${interaction.user?.tag}`);
+      console.log(`[Relay] Model cleared for channel ${channelId} by ${interaction.user?.tag}`);
       return;
     }
 
-    setChannelModel(interaction.channelId, modelArg, interaction.user?.tag || interaction.user?.id || null);
+    setChannelModel(channelId, modelArg, interaction.user?.tag || interaction.user?.id || null);
     await interaction.reply(`Model for this channel set to: \`${modelArg}\``);
-    console.log(`[Relay] Model set for channel ${interaction.channelId}: ${modelArg} by ${interaction.user?.tag}`);
+    console.log(`[Relay] Model set for channel ${channelId}: ${modelArg} by ${interaction.user?.tag}`);
     return;
   }
 
@@ -295,9 +300,11 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     const subcommand = interaction.options.getSubcommand();
+    // When in a thread, interaction.channelId contains the parent channel ID for fallback
+    const parentChannelId = interaction.channel?.isThread?.() ? interaction.channelId : undefined;
 
     if (subcommand === "view") {
-      const current = getChannelPrompt(interaction.channelId);
+      const current = getChannelPrompt(channelId, parentChannelId);
       if (!current) {
         await interaction.reply("No custom system prompt is set for this channel.");
         return;
@@ -309,11 +316,11 @@ client.on("interactionCreate", async (interaction) => {
 
     if (subcommand === "clear") {
       await interaction.deferReply();
-      const existing = getChannelPrompt(interaction.channelId);
+      const existing = getChannelPrompt(channelId);
       if (existing) {
-        clearChannelPrompt(interaction.channelId);
+        clearChannelPrompt(channelId);
         try {
-          const channel = await client.channels.fetch(interaction.channelId);
+          const channel = await client.channels.fetch(channelId);
           if (channel?.isTextBased() && "messages" in channel) {
             const msg = await (channel as any).messages.fetch(existing.messageId);
             if (msg) await msg.unpin();
@@ -323,8 +330,8 @@ client.on("interactionCreate", async (interaction) => {
         }
       }
       await interaction.editReply("Channel system prompt cleared.");
-      console.log(`[Relay] Prompt cleared for channel ${interaction.channelId} by ${interaction.user?.tag}`);
-      await notifyAndRestartAgent(interaction.channelId, "cleared channel system prompt");
+      console.log(`[Relay] Prompt cleared for channel ${channelId} by ${interaction.user?.tag}`);
+      await notifyAndRestartAgent(channelId, "cleared channel system prompt");
       return;
     }
 
@@ -337,7 +344,7 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
 
-      const channel = await client.channels.fetch(interaction.channelId);
+      const channel = await client.channels.fetch(channelId);
       if (!channel || !channel.isTextBased() || !("send" in channel)) {
         await interaction.editReply("Cannot send messages in this channel.");
         return;
@@ -350,11 +357,11 @@ client.on("interactionCreate", async (interaction) => {
         await promptMessage.pin();
         pinned = true;
       } catch (err: any) {
-        console.error(`[Relay] Failed to pin prompt message in ${interaction.channelId}:`, err.message);
+        console.error(`[Relay] Failed to pin prompt message in ${channelId}:`, err.message);
       }
 
-      const existing = getChannelPrompt(interaction.channelId);
-      setChannelPrompt(interaction.channelId, text, promptMessage.id, interaction.user?.id || null);
+      const existing = getChannelPrompt(channelId);
+      setChannelPrompt(channelId, text, promptMessage.id, interaction.user?.id || null);
 
       if (existing) {
         try {
@@ -372,8 +379,8 @@ client.on("interactionCreate", async (interaction) => {
           "Channel system prompt updated, but I couldn't pin the message. Please grant me the **Manage Messages** permission so the prompt stays visible and editable. Restarting agent...",
         );
       }
-      console.log(`[Relay] Prompt set for channel ${interaction.channelId} by ${interaction.user?.tag}`);
-      await notifyAndRestartAgent(interaction.channelId, "updated channel system prompt");
+      console.log(`[Relay] Prompt set for channel ${channelId} by ${interaction.user?.tag}`);
+      await notifyAndRestartAgent(channelId, "updated channel system prompt");
       return;
     }
   }
@@ -480,14 +487,7 @@ app.get("/api/channels/:channelId/pinned-prompt", async (req: Request, res: Resp
 
     const channelId = String(req.params.channelId || "");
 
-    // Prefer database record (source of truth for slash-command-managed prompts)
-    const dbPrompt = getChannelPrompt(channelId);
-    if (dbPrompt) {
-      res.json({ success: true, prompt: dbPrompt.prompt, messageId: dbPrompt.messageId, channelId });
-      return;
-    }
-
-    // Legacy fallback: scan pinned messages for !system / !prompt prefix
+    // Check if this is a thread and get parent channel ID for fallback
     let channel;
     try {
       channel = await client.channels.fetch(channelId);
@@ -504,6 +504,18 @@ app.get("/api/channels/:channelId/pinned-prompt", async (req: Request, res: Resp
       }
       throw fetchErr;
     }
+    const isThread = channel?.isThread?.();
+    const parentChannelId = isThread ? (channel as any).parentId : undefined;
+
+    // Prefer database record (source of truth for slash-command-managed prompts)
+    // Thread-level prompts override channel-level prompts
+    const dbPrompt = getChannelPrompt(channelId, parentChannelId);
+    if (dbPrompt) {
+      res.json({ success: true, prompt: dbPrompt.prompt, messageId: dbPrompt.messageId, channelId });
+      return;
+    }
+
+    // Legacy fallback: scan pinned messages for !system / !prompt prefix
     if (!channel || !channel.isTextBased() || !("messages" in channel)) {
       res.status(400).json({ success: false, error: `Channel ${channelId} not found or not text-based` });
       return;
