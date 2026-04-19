@@ -108,6 +108,14 @@ export const insertStmt = db.prepare(`
   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
+const existsByExternalIdStmt = db.prepare(
+  "SELECT 1 FROM messages WHERE source = ? AND external_id = ? LIMIT 1",
+);
+
+export function hasMessageByExternalId(source: string, externalId: string): boolean {
+  return existsByExternalIdStmt.get(source, externalId) != null;
+}
+
 export function getChannelPrompt(channelId: string): { prompt: string; messageId: string; updatedBy: string | null; updatedAt: string } | null {
   try {
     const row = db.prepare("SELECT prompt, message_id, updated_by, updated_at FROM channel_prompts WHERE channel_id = ?").get(channelId) as any;
