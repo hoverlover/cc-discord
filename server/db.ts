@@ -108,6 +108,14 @@ export const insertStmt = db.prepare(`
   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
+const existsByExternalIdStmt = db.prepare(
+  "SELECT 1 FROM messages WHERE source = ? AND external_id = ? LIMIT 1",
+);
+
+export function hasMessageByExternalId(source: string, externalId: string): boolean {
+  return existsByExternalIdStmt.get(source, externalId) != null;
+}
+
 export function getChannelPrompt(channelId: string, parentChannelId?: string | null): { prompt: string; messageId: string; updatedBy: string | null; updatedAt: string } | null {
   try {
     // First, check for a prompt at the specific channel/thread level

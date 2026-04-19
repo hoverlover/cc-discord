@@ -366,18 +366,39 @@ while true; do
   if [ "$SECONDS_SINCE_HEALTH" -ge "$HEALTH_CHECK_INTERVAL" ]; then
     SECONDS_SINCE_HEALTH=0
 
-    # Check for dead agents and restart them
+    # Check for dead agents. If the agent reported its channel is gone, prune
+    # it from the rotation; otherwise restart.
+    PRUNE_INDICES=()
     for i in "${!KNOWN_CHANNEL_IDS[@]}"; do
       _pid="${KNOWN_CHANNEL_PIDS[$i]}"
       if ! is_agent_alive "$_pid"; then
         _name="${KNOWN_CHANNEL_NAMES[$i]}"
         _cid="${KNOWN_CHANNEL_IDS[$i]}"
         wait "$_pid" 2>/dev/null || true
+        _gone_file="/tmp/cc-discord/agent-${_cid}.gone"
+        if [ -f "$_gone_file" ]; then
+          log "Agent #${_name} (${_cid}) reported channel no longer exists — removing from rotation"
+          rm -f "$_gone_file"
+          PRUNE_INDICES+=("$i")
+          continue
+        fi
         log "Agent #${_name} (${_cid}) exited. Restarting in ${AGENT_RESTART_DELAY}s..."
         sleep "$AGENT_RESTART_DELAY"
         start_channel_agent "$_cid" "$_name"
       fi
     done
+
+    # Apply prunes in reverse index order so earlier indices stay valid.
+    if [ "${#PRUNE_INDICES[@]}" -gt 0 ]; then
+      for _idx in $(printf '%s\n' "${PRUNE_INDICES[@]}" | sort -rn); do
+        unset 'KNOWN_CHANNEL_IDS[_idx]'
+        unset 'KNOWN_CHANNEL_NAMES[_idx]'
+        unset 'KNOWN_CHANNEL_PIDS[_idx]'
+      done
+      KNOWN_CHANNEL_IDS=("${KNOWN_CHANNEL_IDS[@]}")
+      KNOWN_CHANNEL_NAMES=("${KNOWN_CHANNEL_NAMES[@]}")
+      KNOWN_CHANNEL_PIDS=("${KNOWN_CHANNEL_PIDS[@]}")
+    fi
 
     # Check for stuck agents (alive but not polling)
     check_stuck_agents

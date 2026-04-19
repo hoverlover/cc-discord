@@ -86,7 +86,7 @@ client.once("clientReady", async () => {
         option
           .setName("name")
           .setDescription(
-            "Model name or alias (e.g. claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5, or full model ID)",
+            "Model name or alias (e.g. claude-opus-4-7, claude-sonnet-4-7, claude-haiku-4-5, or full model ID)",
           )
           .setRequired(false),
       );
@@ -147,7 +147,7 @@ client.on("guildCreate", async (guild) => {
         option
           .setName("name")
           .setDescription(
-            "Model name or alias (e.g. claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5, or full model ID)",
+            "Model name or alias (e.g. claude-opus-4-7, claude-sonnet-4-7, claude-haiku-4-5, or full model ID)",
           )
           .setRequired(false),
       );
@@ -488,7 +488,22 @@ app.get("/api/channels/:channelId/pinned-prompt", async (req: Request, res: Resp
     const channelId = String(req.params.channelId || "");
 
     // Check if this is a thread and get parent channel ID for fallback
-    const channel = await client.channels.fetch(channelId);
+    let channel;
+    try {
+      channel = await client.channels.fetch(channelId);
+    } catch (fetchErr: any) {
+      // 10003 = Unknown Channel (deleted), 50001 = Missing Access (bot kicked / perms revoked)
+      if (fetchErr?.code === 10003 || fetchErr?.code === 50001) {
+        res.status(404).json({
+          success: false,
+          error: "Channel not found in Discord",
+          code: "UNKNOWN_CHANNEL",
+          channelId,
+        });
+        return;
+      }
+      throw fetchErr;
+    }
     const isThread = channel?.isThread?.();
     const parentChannelId = isThread ? (channel as any).parentId : undefined;
 
