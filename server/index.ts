@@ -488,7 +488,22 @@ app.get("/api/channels/:channelId/pinned-prompt", async (req: Request, res: Resp
     }
 
     // Legacy fallback: scan pinned messages for !system / !prompt prefix
-    const channel = await client.channels.fetch(channelId);
+    let channel;
+    try {
+      channel = await client.channels.fetch(channelId);
+    } catch (fetchErr: any) {
+      // 10003 = Unknown Channel (deleted), 50001 = Missing Access (bot kicked / perms revoked)
+      if (fetchErr?.code === 10003 || fetchErr?.code === 50001) {
+        res.status(404).json({
+          success: false,
+          error: "Channel not found in Discord",
+          code: "UNKNOWN_CHANNEL",
+          channelId,
+        });
+        return;
+      }
+      throw fetchErr;
+    }
     if (!channel || !channel.isTextBased() || !("messages" in channel)) {
       res.status(400).json({ success: false, error: `Channel ${channelId} not found or not text-based` });
       return;
