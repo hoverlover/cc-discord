@@ -4,7 +4,7 @@
 
 import { fetchAttachmentContent } from "./attachment.ts";
 import { CLAUDE_AGENT_ID, DEFAULT_CHANNEL_ID, DISCORD_SESSION_ID, MESSAGE_ROUTING_MODE } from "./config.ts";
-import { insertStmt } from "./db.ts";
+import { hasMessageByExternalId, insertStmt } from "./db.ts";
 import { appendMemoryTurn } from "./memory.ts";
 
 export async function formatInboundMessage(message: any) {
@@ -34,6 +34,12 @@ export async function formatInboundMessage(message: any) {
 }
 
 export async function persistInboundDiscordMessage(message: any): Promise<boolean> {
+  // Skip already-persisted messages before hydrating attachments, so restart
+  // catch-up doesn't re-download binaries for messages we've already stored.
+  if (message.id && hasMessageByExternalId("discord", message.id)) {
+    return false;
+  }
+
   const normalizedContent = await formatInboundMessage(message);
   // In channel mode, route to channelId so per-channel subagents consume independently.
   // In agent mode (legacy), route to CLAUDE_AGENT_ID for single-agent consumption.
