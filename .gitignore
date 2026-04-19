@@ -3,6 +3,7 @@ node_modules/
 .env.relay
 .env.worker
 .claude/settings.local.json
+.claude/worktrees/
 data/
 logs/
 package-lock.json
