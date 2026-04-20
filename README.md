@@ -156,6 +156,7 @@ These are read by the orchestrator shell script:
 | `HEALTH_CHECK_INTERVAL` | `30` | Seconds between full health checks |
 | `UNSERVICED_CHECK_INTERVAL` | `5` | Seconds between checks for new threads/channels needing agents |
 | `AGENT_RESTART_DELAY` | `5` | Seconds to wait before restarting a dead agent |
+| `EAGER_CHANNEL_STARTUP` | `false` | Start Claude in every discovered channel at boot. Leave `false` to start agents only when unread messages exist. |
 | `CC_DISCORD_CONFIG_DIR` | `~/.config/cc-discord` | Directory for user config env files |
 | `CC_DISCORD_LOG_DIR` | `/tmp/cc-discord/logs` | Directory for all log files |
 

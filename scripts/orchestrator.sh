@@ -1,11 +1,12 @@
 #!/bin/bash
-# orchestrator.sh — Discover Discord channels and manage one channel-agent per channel.
+# orchestrator.sh — Discover Discord channels and manage channel-agents on demand.
 #
 # This is a pure shell script (no Claude instance). It:
 # 1. Queries the relay API for active channels
-# 2. Spawns one channel-agent.sh per channel as a child process
-# 3. Monitors children and restarts any that exit
-# 4. On SIGTERM/SIGINT, kills all children and exits cleanly
+# 2. Optionally spawns one channel-agent.sh per discovered channel (eager mode)
+# 3. In lazy mode, only spawns channel-agent.sh when unread messages exist
+# 4. Monitors children and restarts any that exit
+# 5. On SIGTERM/SIGINT, kills all children and exits cleanly
 #
 # Usage: orchestrator.sh
 #
@@ -14,6 +15,7 @@
 #   HEALTH_CHECK_INTERVAL — seconds between health checks (default: 30)
 #   AGENT_RESTART_DELAY — seconds to wait before restarting a dead agent (default: 5)
 #   STUCK_AGENT_THRESHOLD — seconds without heartbeat + unread msgs = stuck (default: 900)
+#   EAGER_CHANNEL_STARTUP — true to start Claude in every discovered channel at boot (default: false)
 
 set -euo pipefail
 
@@ -40,6 +42,7 @@ RELAY_PORT="${RELAY_PORT:-3199}"
 RELAY_API_TOKEN="${RELAY_API_TOKEN:-}"
 HEALTH_CHECK_INTERVAL="${HEALTH_CHECK_INTERVAL:-30}"
 AGENT_RESTART_DELAY="${AGENT_RESTART_DELAY:-5}"
+EAGER_CHANNEL_STARTUP="${EAGER_CHANNEL_STARTUP:-false}"
 
 RELAY_URL="http://${RELAY_HOST}:${RELAY_PORT}"
 
@@ -51,6 +54,13 @@ KNOWN_CHANNEL_PIDS=()
 
 log() {
   echo "[orchestrator] $(date '+%H:%M:%S') $*"
+}
+
+is_truthy() {
+  case "${1,,}" in
+    1|true|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 is_channel_id() {
@@ -67,6 +77,22 @@ find_channel_index() {
     fi
   done
   echo "-1"
+}
+
+register_channel() {
+  local channel_id="$1"
+  local channel_name="$2"
+
+  local idx
+  idx=$(find_channel_index "$channel_id")
+  if [ "$idx" -ge 0 ]; then
+    KNOWN_CHANNEL_NAMES[$idx]="$channel_name"
+    return
+  fi
+
+  KNOWN_CHANNEL_IDS+=("$channel_id")
+  KNOWN_CHANNEL_NAMES+=("$channel_name")
+  KNOWN_CHANNEL_PIDS+=(0)
 }
 
 # Clean shutdown: kill all channel agents
@@ -307,10 +333,18 @@ while IFS=' ' read -r channel_id channel_name; do
     log "WARNING: Ignoring malformed channel discovery line (id='${channel_id}', name='${channel_name}')"
     continue
   fi
-  start_channel_agent "$channel_id" "$channel_name"
+  if is_truthy "$EAGER_CHANNEL_STARTUP"; then
+    start_channel_agent "$channel_id" "$channel_name"
+  else
+    register_channel "$channel_id" "$channel_name"
+  fi
 done < <(discover_channels_lines)
 
-log "Initial spawn complete (${#KNOWN_CHANNEL_IDS[@]} channels). Entering health check loop."
+if is_truthy "$EAGER_CHANNEL_STARTUP"; then
+  log "Initial spawn complete (${#KNOWN_CHANNEL_IDS[@]} channels)."
+else
+  log "Initial discovery complete (${#KNOWN_CHANNEL_IDS[@]} channels, lazy startup enabled)."
+fi
 
 # Check for unread messages with no active agent (e.g. new threads).
 # Spawns agents immediately so users don't wait for the next health check.
@@ -344,13 +378,21 @@ check_unserviced() {
     [ -z "$target_id" ] && continue
     _idx=$(find_channel_index "$target_id")
     if [ "$_idx" -ge 0 ]; then
-      # Agent exists but hasn't polled yet — skip
-      continue
+      _pid="${KNOWN_CHANNEL_PIDS[$_idx]}"
+      if is_agent_alive "$_pid"; then
+        continue
+      fi
+      _name="${KNOWN_CHANNEL_NAMES[$_idx]}"
+    else
+      _name="thread-${target_id}"
     fi
     log "Unserviced messages for ${target_id} — spawning agent"
-    start_channel_agent "$target_id" "thread-${target_id}"
+    start_channel_agent "$target_id" "$_name"
   done <<< "$targets"
 }
+
+# Spawn agents immediately for any unread messages already waiting.
+check_unserviced
 
 # Health check loop — runs unserviced check every UNSERVICED_CHECK_INTERVAL seconds,
 # full health check every HEALTH_CHECK_INTERVAL seconds.
@@ -371,6 +413,9 @@ while true; do
     PRUNE_INDICES=()
     for i in "${!KNOWN_CHANNEL_IDS[@]}"; do
       _pid="${KNOWN_CHANNEL_PIDS[$i]}"
+      if [ "${_pid}" -le 0 ]; then
+        continue
+      fi
       if ! is_agent_alive "$_pid"; then
         _name="${KNOWN_CHANNEL_NAMES[$i]}"
         _cid="${KNOWN_CHANNEL_IDS[$i]}"
@@ -413,7 +458,11 @@ while true; do
       _idx=$(find_channel_index "$channel_id")
       if [ "$_idx" -lt 0 ]; then
         log "New channel discovered: #${channel_name} (${channel_id})"
-        start_channel_agent "$channel_id" "$channel_name"
+        if is_truthy "$EAGER_CHANNEL_STARTUP"; then
+          start_channel_agent "$channel_id" "$channel_name"
+        else
+          register_channel "$channel_id" "$channel_name"
+        fi
       fi
     done < <(discover_channels_lines)
   fi
