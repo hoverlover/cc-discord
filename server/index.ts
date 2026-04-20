@@ -609,7 +609,13 @@ app.post("/api/send", async (req: Request, res: Response) => {
       sent = await channel.send(text);
     }
 
-    persistOutboundDiscordMessage({ content: text, channelId: targetChannelId, externalId: sent.id, fromAgent });
+    persistOutboundDiscordMessage({
+      content: text,
+      channelId: targetChannelId,
+      externalId: sent.id,
+      fromAgent,
+      clearPendingReply: true,
+    });
     stopTypingIndicator(client, targetChannelId, persistOutboundDiscordMessage, "reply-sent");
 
     res.json({ success: true, messageId: sent.id, channelId: targetChannelId });

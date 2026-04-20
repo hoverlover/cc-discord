@@ -232,6 +232,7 @@ describe("messageCreate handler simulation", () => {
       expect(result.logMessages).toContain(
         "[Relay] Processing message from approved bot ApprovedBot (approved-bot-123)"
       );
+      expect(result.typingStarted).toBe(true);
     });
   });
 
@@ -378,6 +379,7 @@ describe("messageCreate handler simulation", () => {
       expect(result.logMessages).toContain(
         "[Relay] Processing message from approved bot TrustedBot (trusted-bot-123)"
       );
+      expect(result.typingStarted).toBe(true);
     });
 
     it("should reject approved bot in unauthorized channel", () => {

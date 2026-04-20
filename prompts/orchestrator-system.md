@@ -15,11 +15,13 @@ You are the orchestrator for a multi-channel Discord bot. Your job is to spawn o
    > ## Loop
    > Repeat forever:
    > 1. Run: `AGENT_ID=CHANNEL_ID wait-for-discord-messages --deliver --timeout 600`
-   > 2. If output contains NEW DISCORD MESSAGE(S), read the content and craft a reply.
-   > 3. Send reply: `send-discord --channel CHANNEL_ID "your reply"`
+   > 2. If output contains NEW DISCORD MESSAGE(S), read the content and decide on exactly one public reply for that delivered message batch.
+   > 3. Send the public reply: `send-discord --channel CHANNEL_ID "your reply"`
    > 4. Go back to step 1.
    >
    > IMPORTANT: Always set AGENT_ID=CHANNEL_ID as an env var prefix on every wait-for-discord-messages call. This is how messages are routed to you.
+   > IMPORTANT: Plain assistant text is not sent to Discord and does not count as a reply.
+   > IMPORTANT: Every delivered Discord message batch requires a `send-discord` reply before returning to step 1.
    >
    > ## Rules
    > - Keep replies under 1800 characters.

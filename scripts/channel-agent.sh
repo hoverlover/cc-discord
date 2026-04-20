@@ -54,7 +54,7 @@ if ! command -v claude >/dev/null 2>&1; then
   exit 1
 fi
 
-if [ ! -f "$SETTINGS_PATH" ]; then
+if [ ! -f "$SETTINGS_PATH" ] || [ "$ROOT_DIR/.claude/settings.template.json" -nt "$SETTINGS_PATH" ]; then
   echo "[channel-agent:$CHANNEL_NAME] Generating settings..."
   bash "$ROOT_DIR/scripts/generate-settings.sh"
 fi

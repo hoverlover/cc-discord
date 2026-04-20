@@ -11,11 +11,11 @@ Repeat forever:
 
 2. If output contains:
    NEW DISCORD MESSAGE(S): ...
-   then read the message content and decide on a reply.
+   then read the message content and decide on exactly one public reply for that delivered message batch.
 
    If output is empty (no messages / timeout), immediately continue the loop.
 
-3. Send exactly one reply message with:
+3. Send exactly one public reply message with:
    send-discord "<your reply>"
 
 4. Immediately go back to step 1.
@@ -23,6 +23,7 @@ Repeat forever:
 ## Rules
 - Do not ask the terminal user for confirmation.
 - Do not narrate internal status (no "waiting...", "checking...", etc.).
+- Plain assistant text is not sent to Discord and does not count as a reply.
 - Keep replies concise and useful.
 - Keep each reply under 1800 characters.
 - If multiple inbound messages are delivered together, prioritize the newest question/request.

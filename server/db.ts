@@ -92,6 +92,21 @@ db.exec(`
     session_name TEXT,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS pending_replies (
+    session_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    pending_count INTEGER NOT NULL DEFAULT 1,
+    last_message_content TEXT NOT NULL,
+    last_external_id TEXT,
+    pending_since TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (session_id, agent_id, channel_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_pending_replies_agent
+    ON pending_replies(session_id, agent_id, updated_at);
 `);
 
 export const insertStmt = db.prepare(`
@@ -112,8 +127,73 @@ const existsByExternalIdStmt = db.prepare(
   "SELECT 1 FROM messages WHERE source = ? AND external_id = ? LIMIT 1",
 );
 
+const markPendingReplyStmt = db.prepare(`
+  INSERT INTO pending_replies (
+    session_id,
+    agent_id,
+    channel_id,
+    pending_count,
+    last_message_content,
+    last_external_id,
+    pending_since,
+    updated_at
+  ) VALUES (?, ?, ?, 1, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+  ON CONFLICT(session_id, agent_id, channel_id) DO UPDATE SET
+    pending_count = pending_replies.pending_count + 1,
+    last_message_content = excluded.last_message_content,
+    last_external_id = excluded.last_external_id,
+    updated_at = CURRENT_TIMESTAMP
+`);
+
+const clearPendingReplyStmt = db.prepare(`
+  DELETE FROM pending_replies
+  WHERE session_id = ?
+    AND agent_id = ?
+    AND channel_id = ?
+`);
+
 export function hasMessageByExternalId(source: string, externalId: string): boolean {
   return existsByExternalIdStmt.get(source, externalId) != null;
+}
+
+export function markPendingReplyRequired(options: {
+  sessionId: string;
+  agentId: string;
+  channelId?: string | null;
+  content: string;
+  externalId?: string | null;
+}) {
+  const { sessionId, agentId, channelId, content, externalId } = options;
+  const normalizedChannelId = channelId || agentId;
+  if (!sessionId || !agentId || !normalizedChannelId || !content) return;
+
+  try {
+    markPendingReplyStmt.run(
+      sessionId,
+      agentId,
+      normalizedChannelId,
+      content,
+      externalId || null,
+    );
+  } catch {
+    // best effort only
+  }
+}
+
+export function clearPendingReplyRequired(options: {
+  sessionId: string;
+  agentId: string;
+  channelId?: string | null;
+}) {
+  const { sessionId, agentId, channelId } = options;
+  const normalizedChannelId = channelId || agentId;
+  if (!sessionId || !agentId || !normalizedChannelId) return;
+
+  try {
+    clearPendingReplyStmt.run(sessionId, agentId, normalizedChannelId);
+  } catch {
+    // best effort only
+  }
 }
 
 export function getChannelPrompt(channelId: string, parentChannelId?: string | null): { prompt: string; messageId: string; updatedBy: string | null; updatedAt: string } | null {

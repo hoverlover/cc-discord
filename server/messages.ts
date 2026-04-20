@@ -4,7 +4,7 @@
 
 import { fetchAttachmentContent } from "./attachment.ts";
 import { CLAUDE_AGENT_ID, DEFAULT_CHANNEL_ID, DISCORD_SESSION_ID, MESSAGE_ROUTING_MODE } from "./config.ts";
-import { hasMessageByExternalId, insertStmt } from "./db.ts";
+import { clearPendingReplyRequired, hasMessageByExternalId, insertStmt, markPendingReplyRequired } from "./db.ts";
 import { appendMemoryTurn } from "./memory.ts";
 
 export async function formatInboundMessage(message: any) {
@@ -58,6 +58,14 @@ export async function persistInboundDiscordMessage(message: any): Promise<boolea
       0,
     );
 
+    markPendingReplyRequired({
+      sessionId: DISCORD_SESSION_ID,
+      agentId: targetAgent,
+      channelId: message.channelId,
+      content: normalizedContent,
+      externalId: message.id || null,
+    });
+
     void appendMemoryTurn({
       role: "user",
       content: normalizedContent,
@@ -87,11 +95,13 @@ export function persistOutboundDiscordMessage({
   channelId,
   externalId,
   fromAgent,
+  clearPendingReply = false,
 }: {
   content: string;
   channelId?: string;
   externalId?: string;
   fromAgent?: string;
+  clearPendingReply?: boolean;
 }) {
   const normalizedContent = String(content);
   const normalizedFromAgent = fromAgent || CLAUDE_AGENT_ID;
@@ -120,6 +130,14 @@ export function persistOutboundDiscordMessage({
         fromAgent: normalizedFromAgent,
       },
     });
+
+    if (clearPendingReply) {
+      clearPendingReplyRequired({
+        sessionId: DISCORD_SESSION_ID,
+        agentId: normalizedFromAgent,
+        channelId: normalizedChannelId,
+      });
+    }
   } catch (err: unknown) {
     console.error("[Relay] failed to persist outbound message:", (err as Error).message);
   }
