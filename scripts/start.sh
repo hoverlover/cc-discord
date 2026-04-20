@@ -105,6 +105,29 @@ log() {
   echo "[start] $(date '+%H:%M:%S') $*"
 }
 
+stop_orphaned_channel_agents() {
+  local pid_file pid cmd
+
+  for pid_file in /tmp/cc-discord/agent-*.pid; do
+    [ -e "$pid_file" ] || break
+
+    pid=$(cat "$pid_file" 2>/dev/null || true)
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      cmd=$(ps -p "$pid" -o command= 2>/dev/null || true)
+      case "$cmd" in
+        *channel-agent.sh*)
+          log "Stopping orphaned channel agent (PID $pid)..."
+          kill -TERM "$pid" 2>/dev/null || true
+          sleep 1
+          kill -KILL "$pid" 2>/dev/null || true
+          ;;
+      esac
+    fi
+
+    rm -f "$pid_file"
+  done
+}
+
 cleanup() {
   log "Shutting down..."
 
@@ -120,6 +143,8 @@ cleanup() {
     wait "$RELAY_PID" 2>/dev/null || true
   fi
 
+  stop_orphaned_channel_agents
+
   # Remove generated settings.local.json so hooks don't fire during normal development
   rm -f "$ROOT_DIR/.claude/settings.local.json"
   rm -f "$CC_DISCORD_HOME/.claude/settings.local.json"
@@ -129,6 +154,8 @@ cleanup() {
 }
 
 trap cleanup SIGTERM SIGINT
+
+stop_orphaned_channel_agents
 
 # ---- Start relay server ----
 log "Starting relay server..."
@@ -161,7 +188,24 @@ if ! claude auth status >/dev/null 2>&1; then
 fi
 log "Claude auth verified."
 
-while ! curl -s --max-time 2 -H "x-api-token: ${RELAY_API_TOKEN}" "http://${RELAY_HOST}:${RELAY_PORT}/api/channels" >/dev/null 2>&1; do
+relay_ready_for_channels() {
+  local response
+  response=$(curl -sf --max-time 2 \
+    -H "x-api-token: ${RELAY_API_TOKEN}" \
+    "http://${RELAY_HOST}:${RELAY_PORT}/api/channels" 2>/dev/null) || return 1
+
+  printf '%s' "$response" | bun -e "
+    const input = await Bun.stdin.text();
+    try {
+      const data = JSON.parse(input);
+      process.exit(data.success && Array.isArray(data.channels) ? 0 : 1);
+    } catch {
+      process.exit(1);
+    }
+  " >/dev/null 2>&1
+}
+
+while ! relay_ready_for_channels; do
   if ! kill -0 "$RELAY_PID" 2>/dev/null; then
     log "ERROR: Relay server exited unexpectedly. Check $RELAY_LOG"
     exit 1

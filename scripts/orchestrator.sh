@@ -56,6 +56,23 @@ log() {
   echo "[orchestrator] $(date '+%H:%M:%S') $*"
 }
 
+relay_channels_ready() {
+  local response
+  response=$(curl -sf --max-time 5 \
+    -H "x-api-token: ${RELAY_API_TOKEN}" \
+    "${RELAY_URL}/api/channels" 2>/dev/null) || return 1
+
+  printf '%s' "$response" | bun -e "
+    const input = await Bun.stdin.text();
+    try {
+      const data = JSON.parse(input);
+      process.exit(data.success && Array.isArray(data.channels) ? 0 : 1);
+    } catch {
+      process.exit(1);
+    }
+  " >/dev/null 2>&1
+}
+
 is_truthy() {
   local value
   value=$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')
@@ -127,24 +144,30 @@ trap cleanup SIGTERM SIGINT
 # Query relay API and output "id name" lines
 discover_channels_lines() {
   local response
-  response=$(curl -s --max-time 10 \
+  response=$(curl -sf --max-time 10 \
     -H "x-api-token: ${RELAY_API_TOKEN}" \
     "${RELAY_URL}/api/channels?include_threads=true" 2>/dev/null) || {
     log "WARNING: Failed to reach relay at ${RELAY_URL}" >&2
-    return
+    return 1
   }
 
-  echo "$response" | bun -e "
+  printf '%s' "$response" | bun -e "
     const input = await Bun.stdin.text();
     try {
       const data = JSON.parse(input);
-      if (data.success && Array.isArray(data.channels)) {
-        for (const ch of data.channels) {
-          console.log(ch.id + ' ' + (ch.name || 'channel-' + ch.id));
-        }
+      if (!data.success || !Array.isArray(data.channels)) {
+        process.exit(1);
       }
-    } catch {}
-  "
+      for (const ch of data.channels) {
+        console.log(ch.id + ' ' + (ch.name || 'channel-' + ch.id));
+      }
+    } catch {
+      process.exit(1);
+    }
+  " 2>/dev/null || {
+    log "WARNING: Relay channel discovery returned an unsuccessful response"
+    return 1
+  }
 }
 
 # Start a channel agent as a child process
@@ -313,10 +336,15 @@ exec >> "$LOG_FILE" 2>&1
 log "Starting (relay=${RELAY_URL}, health_check=${HEALTH_CHECK_INTERVAL}s)"
 log "Logging to $LOG_FILE"
 
+ACTIVITY_RESET_OUTPUT=$(DISCORD_SESSION_ID="${DISCORD_SESSION_ID:-default}" bun "$ROOT_DIR/scripts/reset-agent-activity.ts" 2>&1) || true
+if [ -n "$ACTIVITY_RESET_OUTPUT" ]; then
+  log "$ACTIVITY_RESET_OUTPUT"
+fi
+
 # Wait for relay to be reachable
 MAX_WAIT=60
 WAITED=0
-while ! curl -s --max-time 3 -H "x-api-token: ${RELAY_API_TOKEN}" "${RELAY_URL}/api/channels" >/dev/null 2>&1; do
+while ! relay_channels_ready; do
   if [ "$WAITED" -ge "$MAX_WAIT" ]; then
     log "ERROR: Relay not reachable after ${MAX_WAIT}s. Exiting."
     exit 1

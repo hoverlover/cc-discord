@@ -152,6 +152,11 @@ const clearPendingReplyStmt = db.prepare(`
     AND channel_id = ?
 `);
 
+const clearAgentActivityStmt = db.prepare(`
+  DELETE FROM agent_activity
+  WHERE session_id = ?
+`);
+
 export function hasMessageByExternalId(source: string, externalId: string): boolean {
   return existsByExternalIdStmt.get(source, externalId) != null;
 }
@@ -193,6 +198,17 @@ export function clearPendingReplyRequired(options: {
     clearPendingReplyStmt.run(sessionId, agentId, normalizedChannelId);
   } catch {
     // best effort only
+  }
+}
+
+export function clearAgentActivityForSession(sessionId: string): number {
+  if (!sessionId) return 0;
+
+  try {
+    const result = clearAgentActivityStmt.run(sessionId) as { changes?: number } | undefined;
+    return Number(result?.changes || 0);
+  } catch {
+    return 0;
   }
 }
 
