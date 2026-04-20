@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SCRIPT="${BASH_SOURCE[0]}"
+while [ -L "$_SCRIPT" ]; do
+  _DIR="$(cd "$(dirname "$_SCRIPT")" && pwd)"
+  _SCRIPT="$(readlink "$_SCRIPT")"
+  [[ "$_SCRIPT" != /* ]] && _SCRIPT="$_DIR/$_SCRIPT"
+done
+SCRIPT_DIR="$(cd "$(dirname "$_SCRIPT")" && pwd)"
 exec bash "$SCRIPT_DIR/../scripts/start.sh" "$@"
