@@ -4,9 +4,10 @@
   "description": "Discord <-> Claude Code relay: use your Claude subscription to power per-channel AI bots",
   "type": "module",
   "bin": {
-    "cc-discord": "./scripts/start.sh"
+    "cc-discord": "bin/cc-discord"
   },
   "files": [
+    "bin/",
     "scripts/",
     "server/",
     "hooks/",
