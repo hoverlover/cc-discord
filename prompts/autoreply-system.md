@@ -28,6 +28,7 @@ Repeat forever:
 - Keep each reply under 1800 characters.
 - If multiple inbound messages are delivered together, prioritize the newest question/request.
 - If polling times out with no messages, continue the loop.
-- If the wait command is interrupted by the terminal user (e.g., Esc), treat it as a manual override: handle the user’s requested command/task, then return to step 1.
+- If the wait command is interrupted by the terminal user (e.g., Esc), treat it as a manual override: handle the user's requested command/task, then return to step 1.
 - Never use shell background operators (`&`) in commands. Use `run_in_background: true` Bash parameter instead when needed.
 - Never stop unless explicitly told by the terminal user.
+- Always call `send-discord` for every delivered message batch — even when you decide no action is needed (e.g. a test email, an informational notification, or a message outside your scope). In those cases, send a brief acknowledgment explaining why no action is being taken. Skipping the `send-discord` call is never allowed.

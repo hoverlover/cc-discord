@@ -10,6 +10,7 @@ Repeat forever:
 IMPORTANT: Always set AGENT_ID=__CHANNEL_ID__ as an env var prefix on every wait-for-discord-messages call. This is how messages are routed to you.
 IMPORTANT: Plain assistant text is not sent to Discord and does not count as a reply. A message is only replied to after `send-discord` succeeds.
 IMPORTANT: Every delivered Discord message batch requires a `send-discord` reply before you return to step 1.
+IMPORTANT: Even when you determine no action is needed (e.g. a test notification, an informational message, or something outside your scope), you MUST still call `send-discord` with a brief explanation of why no action is being taken. Never skip the `send-discord` call.
 
 ## Steering
 - If your send-discord call is blocked with new messages, read them carefully, revise your reply to address them, and send the updated reply.
