@@ -159,6 +159,7 @@ These are read by the orchestrator shell script:
 | `EAGER_CHANNEL_STARTUP` | `false` | Start Claude in every discovered channel at boot. Leave `false` to start agents only when unread messages exist. |
 | `CC_DISCORD_CONFIG_DIR` | `~/.config/cc-discord` | Directory for user config env files |
 | `CC_DISCORD_LOG_DIR` | `/tmp/cc-discord/logs` | Directory for all log files |
+| `CC_DISCORD_RUNTIME_DIR` | `~/.local/share/cc-discord/runtime` | Persistent runtime copy used when launched from `bunx` |
 
 Security note: the worker process intentionally does not receive `DISCORD_BOT_TOKEN`.
 

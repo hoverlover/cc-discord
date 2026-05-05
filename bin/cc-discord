@@ -8,4 +8,44 @@ while [ -L "$_SCRIPT" ]; do
   [[ "$_SCRIPT" != /* ]] && _SCRIPT="$_DIR/$_SCRIPT"
 done
 SCRIPT_DIR="$(cd "$(dirname "$_SCRIPT")" && pwd)"
-exec bash "$SCRIPT_DIR/../scripts/start.sh" "$@"
+PACKAGE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# bunx materializes scoped packages under a temporary bunx-* directory. That is
+# fine for short-lived CLIs, but cc-discord is a long-running service whose
+# server and hooks may lazy-load dependency files hours after startup.
+if [ "${CC_DISCORD_SKIP_BUNX_BOOTSTRAP:-}" != "1" ]; then
+  case "$PACKAGE_DIR" in
+    */bunx-*/node_modules/@hoverlover/cc-discord|*/bunx-*/*/node_modules/@hoverlover/cc-discord)
+      NODE_MODULES_DIR="$(cd "$PACKAGE_DIR/../.." && pwd)"
+      INSTALL_ROOT="$(cd "$NODE_MODULES_DIR/.." && pwd)"
+      PACKAGE_VERSION="$(bun -e 'const pkg = await Bun.file(process.argv[1]).json(); console.log(pkg.version);' "$PACKAGE_DIR/package.json")"
+
+      RUNTIME_ID="$PACKAGE_VERSION"
+      if [ -f "$INSTALL_ROOT/bun.lock" ]; then
+        LOCK_ID="$(cksum "$INSTALL_ROOT/bun.lock" | awk '{print $1 "-" $2}')"
+        RUNTIME_ID="$PACKAGE_VERSION-$LOCK_ID"
+      fi
+
+      RUNTIME_BASE="${CC_DISCORD_RUNTIME_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/cc-discord/runtime}"
+      RUNTIME_DIR="$RUNTIME_BASE/$RUNTIME_ID"
+      RUNTIME_NODE_MODULES="$RUNTIME_DIR/node_modules"
+      RUNTIME_PACKAGE_DIR="$RUNTIME_NODE_MODULES/@hoverlover/cc-discord"
+
+      if [ ! -x "$RUNTIME_PACKAGE_DIR/bin/cc-discord" ]; then
+        TMP_RUNTIME_DIR="$RUNTIME_BASE/.install-$RUNTIME_ID.$$"
+        rm -rf "$TMP_RUNTIME_DIR"
+        mkdir -p "$TMP_RUNTIME_DIR"
+        cp -R "$NODE_MODULES_DIR" "$TMP_RUNTIME_DIR/node_modules"
+        [ -f "$INSTALL_ROOT/bun.lock" ] && cp "$INSTALL_ROOT/bun.lock" "$TMP_RUNTIME_DIR/bun.lock"
+        [ -f "$INSTALL_ROOT/package.json" ] && cp "$INSTALL_ROOT/package.json" "$TMP_RUNTIME_DIR/package.json"
+        rm -rf "$RUNTIME_DIR"
+        mv "$TMP_RUNTIME_DIR" "$RUNTIME_DIR"
+      fi
+
+      export CC_DISCORD_SKIP_BUNX_BOOTSTRAP=1
+      exec bash "$RUNTIME_PACKAGE_DIR/bin/cc-discord" "$@"
+      ;;
+  esac
+fi
+
+exec bash "$PACKAGE_DIR/scripts/start.sh" "$@"
