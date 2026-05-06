@@ -7,15 +7,13 @@
  * as the block reason, and forces the agent to revise its reply.
  *
  * Hook input:  snake_case fields (hook_event_name, tool_name, tool_input)
- * Hook output: { "decision": "block", "reason": "..." } or silent exit 0
+ * Hook output: PreToolUse deny JSON or silent exit 0
  */
 
 import { Database as DatabaseSync } from "bun:sqlite";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { buildPreToolUseDeny } from "./pretool-deny.ts";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT_DIR = process.env.ORCHESTRATOR_DIR || join(__dirname, "..");
 const DATA_DIR = process.env.CC_DISCORD_DATA_DIR || join(process.env.HOME || "", ".cc-discord", "data");
 
 const agentId = process.env.AGENT_ID || process.env.CLAUDE_AGENT_ID || "claude";
@@ -91,7 +89,7 @@ try {
     ...formatted,
   ].join("\n");
 
-  process.stdout.write(JSON.stringify({ decision: "block", reason }));
+  process.stdout.write(JSON.stringify(buildPreToolUseDeny(reason)));
   process.exit(0);
 } catch {
   try {
