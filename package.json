@@ -1,6 +1,6 @@
 {
   "name": "@hoverlover/cc-discord",
-  "version": "0.8.12",
+  "version": "0.8.13",
   "description": "Discord <-> Claude Code relay: use your Claude subscription to power per-channel AI bots",
   "type": "module",
   "bin": {
