@@ -16,7 +16,7 @@
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated (`claude auth login`)
 - A Discord bot (see [Create a Discord bot](#create-a-discord-bot) below)
 
-### Option A: Run directly with bunx (recommended)
+### Option A: Run directly with bunx (interactive use)
 
 ```bash
 bunx @hoverlover/cc-discord
@@ -31,6 +31,8 @@ This installs and runs cc-discord in one step. On first run, config files are cr
 ```
 
 Edit those files with your credentials, then run again. Override the config location with `CC_DISCORD_CONFIG_DIR`.
+
+For service managers like `launchd` or `systemd`, install once with `bun install --global @hoverlover/cc-discord` and run the `cc-discord` binary instead of `bunx`. `bunx` re-checks the package manifest on startup, which can cause boot-time failures or repeated log noise if the registry is unreachable.
 
 ### Option B: Clone the repo (contributors)
 
@@ -290,10 +292,11 @@ To keep cc-discord running across reboots and terminal closures, install it as a
 
 ### macOS (launchd)
 
-1. Find the full paths to `bunx` and `claude`:
+1. Install cc-discord globally once, then find the full paths to `cc-discord` and `claude`:
 
 ```bash
-which bunx    # e.g. /Users/you/.bun/bin/bunx
+bun install --global @hoverlover/cc-discord
+which cc-discord  # e.g. /Users/you/.bun/bin/cc-discord
 which claude  # e.g. /Users/you/.local/bin/claude
 ```
 
@@ -311,14 +314,13 @@ cat > ~/Library/LaunchAgents/com.cc-discord.plist << 'EOF'
 
   <key>ProgramArguments</key>
   <array>
-    <!-- Replace with the output of: which bunx -->
-    <string>/Users/you/.bun/bin/bunx</string>
-    <string>@hoverlover/cc-discord</string>
+    <!-- Replace with the output of: which cc-discord -->
+    <string>/Users/you/.bun/bin/cc-discord</string>
   </array>
 
   <key>EnvironmentVariables</key>
   <dict>
-    <!-- Must include directories for both bunx and claude -->
+    <!-- Must include directories for both cc-discord/bun and claude -->
     <key>PATH</key>
     <string>/Users/you/.bun/bin:/Users/you/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
   </dict>
@@ -339,7 +341,7 @@ cat > ~/Library/LaunchAgents/com.cc-discord.plist << 'EOF'
 EOF
 ```
 
-3. **Important:** launchd does not source your shell profile, so the `PATH` must explicitly include the directories for both `bunx` and `claude`. Verify the paths match your system.
+3. **Important:** launchd does not source your shell profile, so the `PATH` must explicitly include the directories for both `cc-discord`/`bun` and `claude`. Verify the paths match your system.
 
 4. Load the service:
 
@@ -367,10 +369,11 @@ rm ~/Library/LaunchAgents/com.cc-discord.plist
 
 ### Linux (systemd)
 
-1. Find the full paths to `bunx` and `claude`:
+1. Install cc-discord globally once, then find the full paths to `cc-discord` and `claude`:
 
 ```bash
-which bunx    # e.g. /home/you/.bun/bin/bunx
+bun install --global @hoverlover/cc-discord
+which cc-discord  # e.g. /home/you/.bun/bin/cc-discord
 which claude  # e.g. /home/you/.local/bin/claude
 ```
 
@@ -387,8 +390,8 @@ Wants=network-online.target
 Type=simple
 # Replace "you" with your username
 User=you
-# Replace with the output of: which bunx
-ExecStart=/home/you/.bun/bin/bunx @hoverlover/cc-discord
+# Replace with the output of: which cc-discord
+ExecStart=/home/you/.bun/bin/cc-discord
 # Ensure bun and claude are on PATH
 Environment=PATH=/home/you/.bun/bin:/home/you/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=HOME=/home/you
@@ -431,7 +434,7 @@ sudo systemctl disable cc-discord
 
 ### Notes
 
-- Both approaches run `bunx @hoverlover/cc-discord`, which is the same as `bun start` in the cloned repo.
+- Service managers should run the installed `cc-discord` binary or a local clone with `bun start`, not `bunx`. `bunx` re-resolves package metadata on startup and may log errors like `ConnectionRefused downloading package manifest @hoverlover/cc-discord` when the registry is unreachable.
 - Environment files are read from `~/.config/cc-discord/` — make sure those are configured before starting the service.
 - Application logs still go to `CC_DISCORD_LOG_DIR` (default `/tmp/cc-discord/logs`). The launchd/systemd logs are separate and capture startup errors.
 - Claude CLI must be authenticated (`claude auth login`) as the user the service runs under before starting.

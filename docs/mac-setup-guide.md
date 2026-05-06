@@ -239,8 +239,7 @@ sudo tee /Library/LaunchDaemons/com.cc-discord.plist << 'EOF'
 
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/your-username/.bun/bin/bunx</string>
-    <string>@hoverlover/cc-discord@latest</string>
+    <string>/Users/your-username/.bun/bin/cc-discord</string>
   </array>
 
   <key>EnvironmentVariables</key>
@@ -296,8 +295,7 @@ cat > ~/Library/LaunchAgents/com.cc-discord.plist << 'EOF'
 
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/your-username/.bun/bin/bunx</string>
-    <string>@hoverlover/cc-discord@latest</string>
+    <string>/Users/your-username/.bun/bin/cc-discord</string>
   </array>
 
   <key>EnvironmentVariables</key>
@@ -431,9 +429,9 @@ This usually means SIP is still enabled or you're trying to modify the system-le
 2. Verify environment variables are correct in the plist
 3. Test running the command manually:
    ```bash
-   HOME=/Users/your-username /Users/your-username/.bun/bin/bunx @hoverlover/cc-discord@latest
+   HOME=/Users/your-username /Users/your-username/.bun/bin/cc-discord
    ```
-4. If `bunx` is downloading a new version, the KeepAlive restart timer may interfere. Wait for the download to complete.
+4. If you see `ConnectionRefused downloading package manifest @hoverlover/cc-discord`, the service is still using `bunx`. Switch the plist to `/Users/your-username/.bun/bin/cc-discord` so launchd starts the installed binary without contacting the package registry on each boot.
 
 ### Can't access Mac remotely after reboot
 
