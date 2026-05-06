@@ -105,6 +105,25 @@ log() {
   echo "[start] $(date '+%H:%M:%S') $*"
 }
 
+package_version() {
+  local version
+  version=$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$ROOT_DIR/package.json" 2>/dev/null | head -n 1 || true)
+  if [ -n "$version" ]; then
+    echo "$version"
+    return 0
+  fi
+
+  if command -v bun >/dev/null 2>&1; then
+    bun -e 'const pkg = await Bun.file(process.argv[1]).json(); console.log(pkg.version || "unknown");' "$ROOT_DIR/package.json" 2>/dev/null && return 0
+  fi
+
+  if command -v node >/dev/null 2>&1; then
+    node -p "require(process.argv[1]).version || 'unknown'" "$ROOT_DIR/package.json" 2>/dev/null && return 0
+  fi
+
+  echo "unknown"
+}
+
 stop_orphaned_channel_agents() {
   local pid_file pid cmd
 
@@ -156,6 +175,8 @@ cleanup() {
 trap cleanup SIGTERM SIGINT
 
 stop_orphaned_channel_agents
+
+log "Starting cc-discord v$(package_version)"
 
 # ---- Start relay server ----
 log "Starting relay server..."

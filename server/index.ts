@@ -1,15 +1,15 @@
 #!/usr/bin/env bun
 
+import { readFileSync } from "node:fs";
 import { Client, GatewayIntentBits, MessageType, REST, Routes, SlashCommandBuilder } from "discord.js";
 import express, { type NextFunction, type Request, type Response } from "express";
-import { readFileSync } from "node:fs";
 import { cleanupOldAttachments } from "./attachment.ts";
 import { maybeNotifyBusyQueued } from "./busy-notify.ts";
 import { catchUpMissedMessages } from "./catchup.ts";
 import {
+  ALLOWED_BOT_IDS,
   ALLOWED_CHANNEL_IDS,
   ALLOWED_DISCORD_USER_IDS,
-  ALLOWED_BOT_IDS,
   BUSY_NOTIFY_COOLDOWN_MS,
   BUSY_NOTIFY_ON_QUEUE,
   DEFAULT_CHANNEL_ID,
@@ -28,12 +28,34 @@ import {
   TYPING_MAX_MS,
   validateConfig,
 } from "./config.ts";
-import { clearChannelModel, clearChannelPrompt, db, getAgentHealthAll, getChannelModel, getChannelPrompt, getUnservicedTargets, isTraceThread, setChannelModel, setChannelPrompt } from "./db.ts";
+import {
+  clearChannelModel,
+  clearChannelPrompt,
+  db,
+  getAgentHealthAll,
+  getChannelModel,
+  getChannelPrompt,
+  getUnservicedTargets,
+  isTraceThread,
+  setChannelModel,
+  setChannelPrompt,
+} from "./db.ts";
 import { memoryStore } from "./memory.ts";
 import { persistInboundDiscordMessage, persistOutboundDiscordMessage } from "./messages.ts";
 import { shouldProcessMessage } from "./permissions.ts";
 import { startTraceFlushLoop, stopTraceFlushLoop } from "./trace-thread.ts";
 import { startTypingIndicator, stopAllTypingSessions, stopTypingIndicator } from "./typing.ts";
+
+function readPackageVersion(): string {
+  try {
+    const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+    return String(pkg.version || "unknown");
+  } catch {
+    return "unknown";
+  }
+}
+
+console.log(`[Relay] cc-discord v${readPackageVersion()} starting`);
 
 validateConfig();
 
@@ -98,9 +120,7 @@ client.once("clientReady", async () => {
         sub
           .setName("set")
           .setDescription("Set or update the channel system prompt")
-          .addStringOption((opt) =>
-            opt.setName("text").setDescription("The system prompt text").setRequired(true),
-          ),
+          .addStringOption((opt) => opt.setName("text").setDescription("The system prompt text").setRequired(true)),
       )
       .addSubcommand((sub) => sub.setName("view").setDescription("View the current channel system prompt"))
       .addSubcommand((sub) => sub.setName("clear").setDescription("Clear the channel system prompt"));
@@ -202,7 +222,7 @@ client.on("messageCreate", async (message) => {
   if (message.type === MessageType.ThreadCreated || message.type === MessageType.ThreadStarterMessage) return;
   if (!isAllowedChannelForMessage(message)) return;
   if (message.channel?.isThread?.() && isTraceThread(message.channelId)) return;
-  
+
   startTypingIndicator(client, message.channelId, persistOutboundDiscordMessage);
   maybeNotifyBusyQueued(message, client, persistOutboundDiscordMessage);
   await persistInboundDiscordMessage(message);
@@ -309,7 +329,7 @@ client.on("interactionCreate", async (interaction) => {
         await interaction.reply("No custom system prompt is set for this channel.");
         return;
       }
-      const text = current.prompt.length > 1800 ? current.prompt.slice(0, 1800) + "..." : current.prompt;
+      const text = current.prompt.length > 1800 ? `${current.prompt.slice(0, 1800)}...` : current.prompt;
       await interaction.reply(`Current channel system prompt:\n\n${text}`);
       return;
     }
@@ -345,7 +365,7 @@ client.on("interactionCreate", async (interaction) => {
       }
 
       const channel = await client.channels.fetch(channelId);
-      if (!channel || !channel.isTextBased() || !("send" in channel)) {
+      if (!channel?.isTextBased() || !("send" in channel)) {
         await interaction.editReply("Cannot send messages in this channel.");
         return;
       }
@@ -428,7 +448,7 @@ app.get("/api/channels", async (req: Request, res: Response) => {
     for (const [, guild] of client.guilds.cache) {
       const guildChannels = await guild.channels.fetch();
       for (const [, channel] of guildChannels) {
-        if (!channel || !channel.isTextBased() || channel.isThread() || channel.isVoiceBased()) continue;
+        if (!channel?.isTextBased() || channel.isThread() || channel.isVoiceBased()) continue;
         if (IGNORED_CHANNEL_IDS.has(channel.id)) continue;
         if (ALLOWED_CHANNEL_IDS.length > 0 && !ALLOWED_CHANNEL_IDS.includes(channel.id)) continue;
         channels.push({
@@ -488,7 +508,7 @@ app.get("/api/channels/:channelId/pinned-prompt", async (req: Request, res: Resp
     const channelId = String(req.params.channelId || "");
 
     // Check if this is a thread and get parent channel ID for fallback
-    let channel;
+    let channel: Awaited<ReturnType<typeof client.channels.fetch>>;
     try {
       channel = await client.channels.fetch(channelId);
     } catch (fetchErr: any) {
@@ -516,7 +536,7 @@ app.get("/api/channels/:channelId/pinned-prompt", async (req: Request, res: Resp
     }
 
     // Legacy fallback: scan pinned messages for !system / !prompt prefix
-    if (!channel || !channel.isTextBased() || !("messages" in channel)) {
+    if (!channel?.isTextBased() || !("messages" in channel)) {
       res.status(400).json({ success: false, error: `Channel ${channelId} not found or not text-based` });
       return;
     }
@@ -592,7 +612,7 @@ app.post("/api/send", async (req: Request, res: Response) => {
     }
 
     const channel = await client.channels.fetch(targetChannelId);
-    if (!channel || !channel.isTextBased()) {
+    if (!channel?.isTextBased()) {
       res.status(400).json({ success: false, error: `Channel ${targetChannelId} not found or not text-based` });
       return;
     }
