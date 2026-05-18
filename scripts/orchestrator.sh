@@ -12,6 +12,7 @@
 #
 # Environment:
 #   RELAY_HOST, RELAY_PORT, RELAY_API_TOKEN — relay server coordinates
+#   CC_DISCORD_RUNTIME_DIR — directory for pid/lock/runtime marker files (default: /tmp/cc-discord)
 #   HEALTH_CHECK_INTERVAL — seconds between health checks (default: 30)
 #   AGENT_RESTART_DELAY — seconds to wait before restarting a dead agent (default: 5)
 #   STUCK_AGENT_THRESHOLD — seconds without heartbeat + unread msgs = stuck (default: 900)
@@ -43,6 +44,7 @@ RELAY_API_TOKEN="${RELAY_API_TOKEN:-}"
 HEALTH_CHECK_INTERVAL="${HEALTH_CHECK_INTERVAL:-30}"
 AGENT_RESTART_DELAY="${AGENT_RESTART_DELAY:-5}"
 EAGER_CHANNEL_STARTUP="${EAGER_CHANNEL_STARTUP:-false}"
+RUNTIME_DIR="${CC_DISCORD_RUNTIME_DIR:-/tmp/cc-discord}"
 
 RELAY_URL="http://${RELAY_HOST}:${RELAY_PORT}"
 
@@ -327,6 +329,7 @@ check_stuck_agents() {
 
 # Set up logging
 LOG_DIR="${CC_DISCORD_LOG_DIR:-/tmp/cc-discord/logs}"
+mkdir -p "$RUNTIME_DIR"
 mkdir -p "$LOG_DIR"
 LOG_FILE="${LOG_DIR}/orchestrator.log"
 
@@ -450,7 +453,7 @@ while true; do
         _name="${KNOWN_CHANNEL_NAMES[$i]}"
         _cid="${KNOWN_CHANNEL_IDS[$i]}"
         wait "$_pid" 2>/dev/null || true
-        _gone_file="/tmp/cc-discord/agent-${_cid}.gone"
+        _gone_file="${RUNTIME_DIR}/agent-${_cid}.gone"
         if [ -f "$_gone_file" ]; then
           log "Agent #${_name} (${_cid}) reported channel no longer exists — removing from rotation"
           rm -f "$_gone_file"

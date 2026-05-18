@@ -248,6 +248,16 @@ Use `/model` in any channel to get or set the Claude model for that channel:
 - `/model name:claude-opus-4-7` — set the model
 - `/model name:clear` — reset to default
 
+### /prompt slash command
+
+Use `/prompt` to manage the system prompt for the current channel or thread:
+
+- `/prompt set text:...` — set or update the channel prompt
+- `/prompt view` — show the active prompt
+- `/prompt clear` — remove the prompt
+
+By default, only slash-command-managed prompts are active. Legacy pinned `!prompt` or `!system` messages are ignored unless `ENABLE_LEGACY_PINNED_PROMPTS=true` is set.
+
 ### Memory system
 
 A pluggable memory system backed by SQLite provides cross-session context. When a message arrives, the `check-discord-messages` hook retrieves relevant prior turns (avoiding duplicates from the current session) and includes them as memory context.

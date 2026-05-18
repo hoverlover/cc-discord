@@ -8,14 +8,10 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const ROOT_DIR = join(__dirname, "..");
-export const DATA_DIR =
-  process.env.CC_DISCORD_DATA_DIR ||
-  join(process.env.HOME || "", ".cc-discord", "data");
+export const DATA_DIR = process.env.CC_DISCORD_DATA_DIR || join(process.env.HOME || "", ".cc-discord", "data");
 
 // User config directory (~/.config/cc-discord by default, override with CC_DISCORD_CONFIG_DIR)
-const CONFIG_DIR =
-  process.env.CC_DISCORD_CONFIG_DIR ||
-  join(process.env.HOME || "", ".config", "cc-discord");
+const CONFIG_DIR = process.env.CC_DISCORD_CONFIG_DIR || join(process.env.HOME || "", ".config", "cc-discord");
 
 // Preferred split env file for relay process; legacy fallback for compatibility.
 // Precedence: ROOT_DIR > CONFIG_DIR (loadDotEnv skips keys already set)
@@ -70,6 +66,9 @@ export const RELAY_HOST = process.env.RELAY_HOST || "127.0.0.1";
 export const RELAY_PORT = Number(process.env.RELAY_PORT || 3199);
 export const RELAY_API_TOKEN = process.env.RELAY_API_TOKEN || "";
 export const RELAY_ALLOW_NO_AUTH = String(process.env.RELAY_ALLOW_NO_AUTH || "false").toLowerCase() === "true";
+export const RUNTIME_DIR = process.env.CC_DISCORD_RUNTIME_DIR || "/tmp/cc-discord";
+export const ENABLE_LEGACY_PINNED_PROMPTS =
+  String(process.env.ENABLE_LEGACY_PINNED_PROMPTS || "false").toLowerCase() === "true";
 
 export const TYPING_INTERVAL_MS = Number(process.env.TYPING_INTERVAL_MS || 8000);
 export const TYPING_MAX_MS = Number(process.env.TYPING_MAX_MS || 120000);
@@ -84,8 +83,7 @@ export const BUSY_NOTIFY_COOLDOWN_MS = Number(process.env.BUSY_NOTIFY_COOLDOWN_M
 export const BUSY_NOTIFY_MIN_DURATION_MS = Number(process.env.BUSY_NOTIFY_MIN_DURATION_MS || 30000);
 
 // ── Live Trace Thread ───────────────────────────────────────────────
-export const TRACE_THREAD_ENABLED =
-  String(process.env.TRACE_THREAD_ENABLED || "true").toLowerCase() !== "false";
+export const TRACE_THREAD_ENABLED = String(process.env.TRACE_THREAD_ENABLED || "true").toLowerCase() !== "false";
 export const TRACE_THREAD_NAME = process.env.TRACE_THREAD_NAME || "🔍 Agent Trace";
 export const TRACE_FLUSH_INTERVAL_MS = Number(process.env.TRACE_FLUSH_INTERVAL_MS || 3000);
 

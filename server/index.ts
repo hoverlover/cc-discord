@@ -6,6 +6,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import { cleanupOldAttachments } from "./attachment.ts";
 import { maybeNotifyBusyQueued } from "./busy-notify.ts";
 import { catchUpMissedMessages } from "./catchup.ts";
+import { buildChannelPromptResponse, findLegacyPinnedPrompt } from "./channel-prompts.ts";
 import {
   ALLOWED_BOT_IDS,
   ALLOWED_CHANNEL_IDS,
@@ -15,6 +16,7 @@ import {
   DEFAULT_CHANNEL_ID,
   DISCORD_BOT_TOKEN,
   DISCORD_SESSION_ID,
+  ENABLE_LEGACY_PINNED_PROMPTS,
   IGNORED_CHANNEL_IDS,
   isAllowedChannelForMessage,
   isAllowedPromptUser,
@@ -23,6 +25,7 @@ import {
   RELAY_API_TOKEN,
   RELAY_HOST,
   RELAY_PORT,
+  RUNTIME_DIR,
   THINKING_FALLBACK_ENABLED,
   TYPING_INTERVAL_MS,
   TYPING_MAX_MS,
@@ -270,7 +273,7 @@ async function notifyAndRestartAgent(channelId: string, reason: string) {
   }
 
   try {
-    const pidFile = `/tmp/cc-discord/agent-${channelId}.pid`;
+    const pidFile = `${RUNTIME_DIR}/agent-${channelId}.pid`;
     const pid = Number(readFileSync(pidFile, "utf8").trim());
     if (Number.isInteger(pid) && pid > 0) {
       process.kill(pid, "SIGTERM");
@@ -527,15 +530,21 @@ app.get("/api/channels/:channelId/pinned-prompt", async (req: Request, res: Resp
     const isThread = channel?.isThread?.();
     const parentChannelId = isThread ? (channel as any).parentId : undefined;
 
-    // Prefer database record (source of truth for slash-command-managed prompts)
-    // Thread-level prompts override channel-level prompts
+    // Database records are the source of truth for slash-command-managed prompts.
+    // Thread-level prompts override channel-level prompts.
     const dbPrompt = getChannelPrompt(channelId, parentChannelId);
     if (dbPrompt) {
-      res.json({ success: true, prompt: dbPrompt.prompt, messageId: dbPrompt.messageId, channelId });
+      res.json(buildChannelPromptResponse(channelId, dbPrompt));
       return;
     }
 
-    // Legacy fallback: scan pinned messages for !system / !prompt prefix
+    if (!ENABLE_LEGACY_PINNED_PROMPTS) {
+      res.json(buildChannelPromptResponse(channelId, null));
+      return;
+    }
+
+    // Optional legacy compatibility: scan pinned messages for !system / !prompt prefix.
+    // Disabled by default so arbitrary pinned messages cannot drive prompt restarts.
     if (!channel?.isTextBased() || !("messages" in channel)) {
       res.status(400).json({ success: false, error: `Channel ${channelId} not found or not text-based` });
       return;
@@ -543,20 +552,7 @@ app.get("/api/channels/:channelId/pinned-prompt", async (req: Request, res: Resp
 
     const pinnedResponse = await (channel as any).messages.fetchPins();
     const pinnedItems = Array.isArray(pinnedResponse?.items) ? pinnedResponse.items : [];
-    let prompt: string | null = null;
-    let messageId: string | null = null;
-    for (const item of pinnedItems) {
-      const msg = item?.message;
-      const text = msg?.content?.trim() || "";
-      const match = text.match(/^!(?:system|prompt)\s+(.*)/is);
-      if (match) {
-        prompt = match[1].trim();
-        messageId = msg.id;
-        break;
-      }
-    }
-
-    res.json({ success: true, prompt, messageId, channelId });
+    res.json(buildChannelPromptResponse(channelId, findLegacyPinnedPrompt(pinnedItems), "legacy-pin"));
   } catch (err: unknown) {
     console.error("[Relay] /api/channels/:channelId/pinned-prompt failed:", err);
     res.status(500).json({ success: false, error: (err as Error).message });

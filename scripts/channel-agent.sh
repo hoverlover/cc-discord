@@ -26,6 +26,7 @@ source "$ROOT_DIR/scripts/load-env.sh"
 WORKER_KEYS=(
   DISCORD_SESSION_ID
   CLAUDE_AGENT_ID
+  CC_DISCORD_RUNTIME_DIR
   RELAY_HOST
   RELAY_PORT
   RELAY_URL
@@ -45,6 +46,9 @@ load_env_keys "${CC_DISCORD_CONFIG_DIR:-$HOME/.config/cc-discord}/.env" "${WORKE
 
 # Ensure bun is on PATH for hooks/tools
 export PATH="$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$ROOT_DIR/tools:$PATH"
+
+RUNTIME_DIR="${CC_DISCORD_RUNTIME_DIR:-/tmp/cc-discord}"
+mkdir -p "$RUNTIME_DIR"
 
 SETTINGS_PATH="$ROOT_DIR/.claude/settings.local.json"
 PROMPT_TEMPLATE="$ROOT_DIR/prompts/channel-system.md"
@@ -69,7 +73,7 @@ unset DISCORD_BOT_TOKEN DISCORD_CHANNEL_ID DISCORD_ALLOWED_CHANNEL_IDS
 
 # Kill orphaned poller processes from previous runs of this channel agent.
 # These linger when Claude exits but its child wait-for-discord-messages keeps polling.
-POLLER_LOCK="/tmp/cc-discord/poller-${CHANNEL_ID}-${DISCORD_SESSION_ID:-default}.lock"
+POLLER_LOCK="${RUNTIME_DIR}/poller-${CHANNEL_ID}-${DISCORD_SESSION_ID:-default}.lock"
 if [ -f "$POLLER_LOCK" ]; then
   OLD_PID=$(cat "$POLLER_LOCK" 2>/dev/null)
   if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
@@ -111,8 +115,8 @@ is_channel_gone_response() {
 
 # Mark this channel as gone so the orchestrator prunes it instead of restarting.
 mark_channel_gone() {
-  mkdir -p /tmp/cc-discord
-  : > "/tmp/cc-discord/agent-${CHANNEL_ID}.gone"
+  mkdir -p "$RUNTIME_DIR"
+  : > "${RUNTIME_DIR}/agent-${CHANNEL_ID}.gone"
 }
 
 # Fetch any pinned system prompt override from the channel
@@ -169,7 +173,7 @@ echo "[channel-agent:$CHANNEL_NAME] Starting claude -p (channel=$CHANNEL_ID, ses
 echo "[channel-agent:$CHANNEL_NAME] Logging to $LOG_FILE"
 
 # Write PID so the relay can signal us for event-driven restarts
-AGENT_PID_FILE="/tmp/cc-discord/agent-${CHANNEL_ID}.pid"
+AGENT_PID_FILE="${RUNTIME_DIR}/agent-${CHANNEL_ID}.pid"
 printf '%s' "$$" > "$AGENT_PID_FILE"
 
 # Write the system prompt to a temp file to avoid quoting issues in pipes.
@@ -229,7 +233,7 @@ else
   echo "[channel-agent:$CHANNEL_NAME] Starting fresh Claude session"
 fi
 
-# Hash helper for comparing pinned prompts
+# Hash helper for comparing prompt snapshots.
 hash_string() {
   if command -v md5sum >/dev/null 2>&1; then
     printf '%s' "$1" | md5sum | awk '{print $1}'
@@ -240,14 +244,17 @@ hash_string() {
   fi
 }
 
-PROMPT_HASH_FILE="/tmp/cc-discord/pinned-prompt-hash-${CHANNEL_ID}"
+PROMPT_HASH_FILE="${RUNTIME_DIR}/pinned-prompt-hash-${CHANNEL_ID}"
 INITIAL_HASH=$(hash_string "${PINNED_PROMPT}")
-printf '%s' "$INITIAL_HASH" > "$PROMPT_HASH_FILE"
+# Diagnostic only. The watcher keeps its authoritative last hash in memory so
+# temp-dir cleanup cannot look like a prompt change.
+printf '%s' "$INITIAL_HASH" > "$PROMPT_HASH_FILE" 2>/dev/null || true
 
 # On exit: clean up temp file, kill orphaned pollers, and kill child processes.
 cleanup_agent() {
   rm -f "$PROMPT_FILE"
   rm -f "$AGENT_PID_FILE"
+  rm -f "$PROMPT_HASH_FILE"
   # Kill any poller left behind by this session
   if [ -f "$POLLER_LOCK" ]; then
     local lpid
@@ -266,9 +273,10 @@ cleanup_agent() {
 }
 trap cleanup_agent EXIT
 
-# Background watcher: restart this agent when the pinned prompt changes
+# Background watcher: restart this agent when the active channel prompt changes.
 (
   trap '' TERM INT
+  last_hash="$INITIAL_HASH"
   WATCH_INTERVAL=300
   while true; do
     sleep "$WATCH_INTERVAL"
@@ -293,10 +301,10 @@ trap cleanup_agent EXIT
       } catch {}
     " 2>/dev/null) || continue
     current_hash=$(hash_string "${pinned}")
-    last_hash=$(cat "$PROMPT_HASH_FILE" 2>/dev/null || echo "")
     if [ "$current_hash" != "$last_hash" ]; then
       echo "[channel-agent:$CHANNEL_NAME] Detected pinned prompt change. Restarting agent..."
-      printf '%s' "$current_hash" > "$PROMPT_HASH_FILE"
+      last_hash="$current_hash"
+      printf '%s' "$current_hash" > "$PROMPT_HASH_FILE" 2>/dev/null || true
       send-discord --channel "$CHANNEL_ID" "Restarting to apply updated channel system prompt..."
       # Kill the main script to trigger an orchestrator restart
       kill -TERM "$$" 2>/dev/null || true
