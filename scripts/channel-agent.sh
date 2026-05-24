@@ -102,44 +102,37 @@ SYSTEM_PROMPT="$(sed \
   -e "s|__CHANNEL_NAME__|${CHANNEL_NAME}|g" \
   "$PROMPT_TEMPLATE")"
 
-# Returns 0 if the given JSON response indicates the channel no longer exists in Discord.
-is_channel_gone_response() {
-  echo "$1" | bun -e "
-    const input = require('fs').readFileSync(0, 'utf8');
-    try {
-      const data = JSON.parse(input);
-      process.exit(data && data.code === 'UNKNOWN_CHANNEL' ? 0 : 1);
-    } catch { process.exit(1); }
-  " 2>/dev/null
-}
-
 # Mark this channel as gone so the orchestrator prunes it instead of restarting.
 mark_channel_gone() {
   mkdir -p "$RUNTIME_DIR"
   : > "${RUNTIME_DIR}/agent-${CHANNEL_ID}.gone"
 }
 
-# Fetch any pinned system prompt override from the channel
 RELAY_URL="${RELAY_URL:-http://${RELAY_HOST:-127.0.0.1}:${RELAY_PORT:-3199}}"
+PROMPT_EXTRACTOR="$ROOT_DIR/scripts/extract-channel-prompt.ts"
+
+fetch_channel_prompt() {
+  local response
+  response=$(curl -s --max-time 10 \
+    -H "x-api-token: ${RELAY_API_TOKEN:-}" \
+    "${RELAY_URL}/api/channels/${CHANNEL_ID}/pinned-prompt" 2>/dev/null) || return 1
+
+  printf '%s' "$response" | bun "$PROMPT_EXTRACTOR" 2>/dev/null
+}
+
+# Fetch any pinned system prompt override from the channel.
 PINNED_PROMPT=""
-if [ -n "$RELAY_API_TOKEN" ]; then
-  PINNED_RESPONSE=$(curl -s --max-time 10 \
-    -H "x-api-token: ${RELAY_API_TOKEN}" \
-    "${RELAY_URL}/api/channels/${CHANNEL_ID}/pinned-prompt" 2>/dev/null) || true
-  if is_channel_gone_response "$PINNED_RESPONSE"; then
+PROMPT_BASELINE_READY=false
+if PINNED_PROMPT="$(fetch_channel_prompt)"; then
+  PROMPT_BASELINE_READY=true
+else
+  PROMPT_FETCH_STATUS=$?
+  if [ "$PROMPT_FETCH_STATUS" -eq 2 ]; then
     echo "[channel-agent:$CHANNEL_NAME] Channel ${CHANNEL_ID} no longer exists in Discord — exiting so orchestrator can prune it"
     mark_channel_gone
     exit 0
   fi
-  PINNED_PROMPT=$(echo "$PINNED_RESPONSE" | bun -e "
-    const input = require('fs').readFileSync(0, 'utf8');
-    try {
-      const data = JSON.parse(input);
-      if (data.success && data.prompt) {
-        process.stdout.write(data.prompt);
-      }
-    } catch {}
-  " 2>/dev/null) || true
+  echo "[channel-agent:$CHANNEL_NAME] Could not fetch channel prompt at startup; watcher will retry"
 fi
 
 if [ -n "$PINNED_PROMPT" ]; then
@@ -277,30 +270,39 @@ trap cleanup_agent EXIT
 (
   trap '' TERM INT
   last_hash="$INITIAL_HASH"
+  baseline_ready="$PROMPT_BASELINE_READY"
   WATCH_INTERVAL=300
   while true; do
     sleep "$WATCH_INTERVAL"
-    response=$(curl -s --max-time 10 \
-      -H "x-api-token: ${RELAY_API_TOKEN}" \
-      "${RELAY_URL}/api/channels/${CHANNEL_ID}/pinned-prompt" 2>/dev/null) || continue
-    if is_channel_gone_response "$response"; then
-      echo "[channel-agent:$CHANNEL_NAME] Channel ${CHANNEL_ID} no longer exists in Discord — signaling orchestrator to prune"
-      mark_channel_gone
-      kill -TERM "$$" 2>/dev/null || true
-      sleep 2
-      kill -KILL "$$" 2>/dev/null || true
-      break
+    if pinned="$(fetch_channel_prompt)"; then
+      current_hash=$(hash_string "${pinned}")
+    else
+      prompt_fetch_status=$?
+      if [ "$prompt_fetch_status" -eq 2 ]; then
+        echo "[channel-agent:$CHANNEL_NAME] Channel ${CHANNEL_ID} no longer exists in Discord — signaling orchestrator to prune"
+        mark_channel_gone
+        kill -TERM "$$" 2>/dev/null || true
+        sleep 2
+        kill -KILL "$$" 2>/dev/null || true
+        break
+      fi
+      continue
     fi
-    pinned=$(echo "$response" | bun -e "
-      const input = require('fs').readFileSync(0, 'utf8');
-      try {
-        const data = JSON.parse(input);
-        if (data.success && data.prompt) {
-          process.stdout.write(data.prompt);
-        }
-      } catch {}
-    " 2>/dev/null) || continue
-    current_hash=$(hash_string "${pinned}")
+
+    if [ "$baseline_ready" != "true" ]; then
+      last_hash="$current_hash"
+      baseline_ready=true
+      printf '%s' "$current_hash" > "$PROMPT_HASH_FILE" 2>/dev/null || true
+      if [ -n "$pinned" ]; then
+        echo "[channel-agent:$CHANNEL_NAME] Channel prompt lookup recovered. Restarting agent to apply prompt..."
+        kill -TERM "$$" 2>/dev/null || true
+        sleep 2
+        kill -KILL "$$" 2>/dev/null || true
+        break
+      fi
+      continue
+    fi
+
     if [ "$current_hash" != "$last_hash" ]; then
       echo "[channel-agent:$CHANNEL_NAME] Detected pinned prompt change. Restarting agent..."
       last_hash="$current_hash"
